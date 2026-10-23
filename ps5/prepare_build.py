@@ -53,7 +53,7 @@ code = '\n'.join(line for line in prelude.read_text().splitlines() if '../../exa
 prelude.write_text(code + '\n' + ''.join(f'#include "{h}"\n' for h in HEADERS))
 samples = app / 'ps5/src/samples.cpp'
 samples.write_text(samples.read_text().replace('rpcs3ps5', 'cssteroids')
-                   .replace('KB-RPCS3 Alpha 0.1.0', 'Native PS5 Asteroids').replace('KB-RPCS3', 'PSteroids5'))
+                   .replace('KB-RPCS3 Alpha 0.1.0', 'Native PS5 Asteroids').replace('KB-RPCS3', 'PSteroid5'))
 copies = [('main.cpp', 'ps5/src/main.cpp'), ('cssteroids.cpp', 'examples/cssteroids/cssteroids.cpp'),
           ('link-title.sh', 'ps5/tools/link-title.sh'),
           ('tls_entropy.c', 'ps5/src/tls_entropy.c'), ('tls_config.h', 'ps5/src/tls_config.h')] + [(h, 'ps5/src/' + h) for h in HEADERS]
@@ -66,7 +66,7 @@ for p in (app / 'ps5').rglob('*.sh'):
 param_path = app / 'ps5/sce_sys/param.json'
 param = json.loads(param_path.read_text())
 param.update(titleId=TITLE_ID, conceptId=TITLE_ID[4:], contentId=CONTENT_ID, contentVersion=VERSION)
-param['localizedParameters']['en-US']['titleName'] = 'PSteroids5'
+param['localizedParameters']['en-US']['titleName'] = 'PSteroid5'
 param_path.write_text(json.dumps(param, indent=2) + '\n')
 icon = repo / 'ps5/sce_sys/icon0.png'
 if not icon.is_file():

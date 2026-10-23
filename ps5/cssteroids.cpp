@@ -97,14 +97,14 @@ class VulkanExample : public ps5ui::KitExample {
         if (scoreFetch.take(r)) {
             if (r.ok() && cssteroids::api::parse_high_scores(r.body, board)) onlineStatus = "ONLINE  " + server.label();
             else onlineStatus = r.ok() ? "Server sent unreadable scores" : "Scores unavailable: " + describe(r);
-            say("PSteroids5 scores: status %d %s", r.status, r.error.c_str());
+            say("PSteroid5 scores: status %d %s", r.status, r.error.c_str());
         }
         if (galleryFetch.take(r)) {
             if (r.ok() && cssteroids::parse_ship_list(r.body, gallery)) {
                 hangarStatus = std::to_string(gallery.size()) + " public ships";
                 galleryIndex = std::clamp(galleryIndex, 0, std::max(0, int(gallery.size()) - 1));
             } else hangarStatus = r.ok() ? "Server sent unreadable ships" : "Gallery unavailable: " + describe(r);
-            say("PSteroids5 gallery: status %d %s", r.status, r.error.c_str());
+            say("PSteroid5 gallery: status %d %s", r.status, r.error.c_str());
         }
         if (passFetch.take(r)) {
             cssteroids::json::Value v;
@@ -187,7 +187,7 @@ class VulkanExample : public ps5ui::KitExample {
             drawShip(game.geometry, s.x, s.y, s.angle, 1, s.thrusting);
     }
     void drawTitle() {
-        centered("PSTEROIDS5", 170, 96);
+        centered("PSTEROID5", 170, 96);
         centered("a CSSteroids port for PS5", 240, 28, 0x9fb3c8);
         for (int i = 0; i < menu_count; i++) {
             const bool on = i == menu;
@@ -322,7 +322,7 @@ class VulkanExample : public ps5ui::KitExample {
         socket.emit("join-simple-session", cssteroids::json::Value::string_value(roomId));
         lobbyStep = LobbyStep::waiting;
         lobbyStatus = "Joining room " + cssteroids::coop::room_code(roomId) + " ...";
-        say("PSteroids5 co-op: joining room %s", roomId.c_str());
+        say("PSteroid5 co-op: joining room %s", roomId.c_str());
     }
     void leaveRoom() {
         if (!lobby.roomId.empty()) socket.emit("leave-session");
@@ -471,7 +471,7 @@ class VulkanExample : public ps5ui::KitExample {
         if (state == Client::State::connected && mpWantJoin) {
             mp.begin_join(now, pilot, ship);
             mpWantJoin = false;
-            say("PSteroids5 mmo: socket %s, joining as %s", socket.sid().c_str(), pilot.c_str());
+            say("PSteroid5 mmo: socket %s, joining as %s", socket.sid().c_str(), pilot.c_str());
         }
         cssteroids::sio::Event ev;
         while (socket.poll(ev)) {
@@ -488,7 +488,7 @@ class VulkanExample : public ps5ui::KitExample {
                 mp = {};
                 mp.begin_join(now, pilot, ship, lobby.roomId);
                 screen = Screen::multiplayer;
-                say("PSteroids5 co-op: campaign started in room %s", lobby.roomId.c_str());
+                say("PSteroid5 co-op: campaign started in room %s", lobby.roomId.c_str());
             }
         }
         mp.update(in, now, dt);
@@ -504,7 +504,7 @@ class VulkanExample : public ps5ui::KitExample {
         else if (mp.phase == cssteroids::mmo::Phase::joining) status = "Joining the world ...";
         else if (mp.phase == cssteroids::mmo::Phase::warping) status = "Warping in ...";
         else { char line[96]; std::snprintf(line, sizeof line, "ONLINE  %zu pilots   %.0f ms", mp.players.size() + 1, mp.rtt()); status = line; }
-        if (status != mpStatus) { say("PSteroids5 %s: %s", coopMode ? "co-op" : "mmo", status.c_str()); mpStatus = status; }
+        if (status != mpStatus) { say("PSteroid5 %s: %s", coopMode ? "co-op" : "mmo", status.c_str()); mpStatus = status; }
     }
     void multiplayerInput(uint32_t pressed) {
         using cssteroids::sio::Client;
@@ -659,7 +659,7 @@ class VulkanExample : public ps5ui::KitExample {
 
 public:
     VulkanExample() {
-        title = "PSteroids5"; name = "cssteroids";
+        title = "PSteroid5"; name = "cssteroids";
         settings.overlay = false; ps5.ownOverlay = true;
         defaultClearColor = {{0.f, 0.f, 0.f, 1.f}};
     }
@@ -673,7 +673,7 @@ public:
         requestScores();
         if (ps5.frameBudget > 0) startGame();
         prepared = true;
-        say("PSteroids5 ready: %ux%u output, server %s, ship %s", width, height,
+        say("PSteroid5 ready: %ux%u output, server %s, ship %s", width, height,
             server.valid() ? server.label().c_str() : "(none)", ship.name.c_str());
     }
     void render() override {
