@@ -170,8 +170,8 @@ class VulkanExample : public ps5ui::KitExample {
             drawShip(game.geometry, s.x, s.y, s.angle, 1, s.thrusting);
     }
     void drawTitle() {
-        centered("CSSTEROIDS", 170, 96);
-        centered("PS5 edition", 240, 28, 0x9fb3c8);
+        centered("PSTEROIDS5", 170, 96);
+        centered("a CSSteroids port for PS5", 240, 28, 0x9fb3c8);
         for (int i = 0; i < menu_count; i++) {
             const bool on = i == menu;
             if (on) scene.rounded_rect({760, 300.f + i * 56 - 36, 400, 48}, 8, hui::gfx::Color::rgb(0x2a4a6a, .8f));
@@ -335,7 +335,7 @@ class VulkanExample : public ps5ui::KitExample {
 
 public:
     VulkanExample() {
-        title = "CSSteroids"; name = "cssteroids";
+        title = "PSteroids5"; name = "cssteroids";
         settings.overlay = false; ps5.ownOverlay = true;
         defaultClearColor = {{0.f, 0.f, 0.f, 1.f}};
     }

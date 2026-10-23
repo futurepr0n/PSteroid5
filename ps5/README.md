@@ -1,4 +1,4 @@
-# CSSteroids — native PS5 edition
+# PSteroids5 — native PS5 port of CSSteroids
 
 Title **PPSA99305**, content ID `UP9000-PPSA99305_00-CSSTEROIDSPS5000`, version
 01.000.000. A native C++ folder title of the CSSteroids-2 browser game built with

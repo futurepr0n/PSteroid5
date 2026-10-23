@@ -30,7 +30,7 @@ try {
     $graphics.DrawPolygon($white,[System.Drawing.PointF[]]@(
         [System.Drawing.PointF]::new(250,170),[System.Drawing.PointF]::new(208,300),[System.Drawing.PointF]::new(292,300)))
     $graphics.FillEllipse($shot,281,118,12,12); $graphics.FillEllipse($shot,306,84,10,10)
-    $graphics.DrawString('CSSTEROIDS',$font,$text,[System.Drawing.RectangleF]::new(0,392,512,70),$format)
+    $graphics.DrawString('PSTEROIDS5',$font,$text,[System.Drawing.RectangleF]::new(0,392,512,70),$format)
     $destination=Join-Path $PSScriptRoot 'sce_sys'
     New-Item -ItemType Directory -Path $destination -Force | Out-Null
     $bitmap.Save((Join-Path $destination 'icon0.png'),[System.Drawing.Imaging.ImageFormat]::Png)

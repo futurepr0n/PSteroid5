@@ -1,9 +1,9 @@
 {
   "status": "passed",
   "console_tested": false,
-  "verified_utc": "2026-10-23T16:30:39.994807+00:00",
+  "verified_utc": "2026-10-23T16:37:45.314424+00:00",
   "title_id": "PPSA99305",
-  "eboot_sha256": "8fdec6922738b3f1a4f400ff53dffc82e686e7a84018cd0ce2e42bed24280977",
+  "eboot_sha256": "5197a5d264cb3918f6bb885fe745a629f86497418e71bd8c9edf6db801fee136",
   "checks": [
     "folder/title/content ID agreement",
     "packaged SELF magic (full integrity checked by native linker tool)",
@@ -28,11 +28,11 @@
     "assets/LICENSES/Montserrat-LICENSE.txt": "41f82bb4d24b304f30f7136bc47abdd083782e4265c984160f5649d1e78ea49c",
     "assets/LICENSES/PatrickHand-LICENSE.txt": "377f4f9c19e935228552478eb68cc2ed82910988a60ba60e2ac73b09f32d02d1",
     "assets/LICENSES/PressStart2P-LICENSE.txt": "705960c3281a5765ecc0b59bd4ed7ca59eed165748076bc2fc3e8fdbfeb944b0",
-    "assets/NOTICES.txt": "3ba6391033eda9460aa59ce44ee31e07319c67f17b8938e239c6a54e9330adcc",
+    "assets/NOTICES.txt": "a2d3022b7f04d4d5b3d1dc6d57b00e59ef50cca5316c1c5fbde0fcb9dedd0231",
     "assets/Roboto-Medium.ttf": "8559132c89ad51d8a2ba5b171887a44a7ba93776e205f553573de228e64b45f8",
-    "build-provenance.json": "5a2fa93425beff63e94ae98331c213ccb99057145335777edc9e70cdd5b865c9",
-    "eboot.bin": "8fdec6922738b3f1a4f400ff53dffc82e686e7a84018cd0ce2e42bed24280977",
-    "GAME_README.md": "1194eecc8faf9e02297b54f14835928c6d7423de9ee960381255742269eb309b",
+    "build-provenance.json": "4e59844b998b8cfde2fde69e2ede686bd2b278bf540b5deaa433a8c1aed14615",
+    "eboot.bin": "5197a5d264cb3918f6bb885fe745a629f86497418e71bd8c9edf6db801fee136",
+    "GAME_README.md": "059dc422e6e66fb6dc58d15e00f19ef961dad61b8d4cbd3c2e02be604e2cd888",
     "licenses/GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
     "licenses/Mesa-license.rst": "0d1a0472ecc81830e75c20d59b0ea02841e3db21255e0ebad97ab682c54d6615",
     "licenses/payload-sdk-LICENSE.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
@@ -40,8 +40,8 @@
     "licenses/PS5-VKHomebrewUI-LICENSE.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "licenses/PS5-Vulkan-LICENSE.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "sce_module/libc.prx": "e6ff45d16adf687855cc3b33b0c8a4132b6504360b221e0a34c7e99fb3ba0036",
-    "sce_sys/icon0.png": "a7455399f6532a480168f547afb1ce5dacebf5861a827e3925fe9bf54638ee6f",
-    "sce_sys/param.json": "fa3475c27e773d548f07c075b63aff15bcbda36d93064cb394daad766a243413",
+    "sce_sys/icon0.png": "a6b9e66df0be951e1d1f34faa5221eaea2d86625e898394b09b67fab96dde5ef",
+    "sce_sys/param.json": "aef322d467fe9d6994f81537f4bda046bef84e44edb39dd64d4d57eb18b1bb62",
     "server.txt": "be6eb33cbe16699c99bebde06fa0700946ec42d3d59dbfb66d4386b36207ed69",
     "server.txt.example": "be6eb33cbe16699c99bebde06fa0700946ec42d3d59dbfb66d4386b36207ed69",
     "shaders/glsl/base/textoverlay.frag": "95fbad4500da482cf059a6ccc1e703ea66a9da372db976c89e1529342c1bf86c",
@@ -52,6 +52,6 @@
     "shaders/glsl/base/uioverlay.frag.spv": "3a20529cf2c4dea9a529c38d09d8f56cb0201e8eb2bce0138b01b337aa0b2117",
     "shaders/glsl/base/uioverlay.vert": "10f47b01361d9e4ca5b079eac16385b5927abd7bb36af623cc0379158f3b3a2a",
     "shaders/glsl/base/uioverlay.vert.spv": "466a0e11e535fa184128020c066647604e860388b1d038372c9fb6d9b8ddd58e",
-    "THIRD_PARTY_NOTICES.txt": "6737eecdc5795ba11c3073dcae8e3d4bdb3679d677e91e521b0d06b125923711"
+    "THIRD_PARTY_NOTICES.txt": "329aab725e08e1bdedd8ef3f1048ae196e047e471196ef227587801adbe1c6e8"
   }
 }
