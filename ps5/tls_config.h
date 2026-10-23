@@ -4,7 +4,7 @@
 #pragma once
 
 /* Randomness comes from tls_entropy.c: getrandom() on the host,
- * sceRandomGetRandomNumber() on the PS5. */
+ * sysctl(KERN_ARND) on the PS5. */
 #define MBEDTLS_NO_PLATFORM_ENTROPY
 #define MBEDTLS_ENTROPY_HARDWARE_ALT
 
