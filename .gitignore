@@ -3,3 +3,4 @@ dist/
 *.log
 __pycache__/
 deploy-logs/
+node_modules/

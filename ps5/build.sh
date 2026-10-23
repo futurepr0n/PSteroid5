@@ -36,6 +36,27 @@ for _ in $(seq 50); do [[ -s $app/fixture.port && -s $app/fixture-tls.port ]] &&
 # PSTEROIDS_LIVE (e.g. https://asteroids.futurepr0n.com) adds read-only GETs to a real server.
 PSTEROIDS_LIVE=${PSTEROIDS_LIVE:-} "$app/test-net" "$(cat "$app/fixture.port")" "$(cat "$app/fixture-tls.port")"
 
+# Multiplayer: WebSocket/socket.io client and the shared-world model. Golden vectors come from
+# the real world-sim.js (tools/gen-world-vectors.js). The live parts run against a socket.io
+# fixture and the REAL CSSteroids-2 world engine (tools/sio-fixture), using Windows Node from WSL.
+g++ -std=c++20 -O2 -Wall -Wextra -pedantic -pthread "${tls[@]}" "$repo/ps5/test_sio.cpp" "$host/libmbedtls.a" -o "$app/test-sio"
+g++ -std=c++20 -O2 -Wall -Wextra -pedantic -pthread "${tls[@]}" "$repo/ps5/test_mmo.cpp" "$host/libmbedtls.a" -o "$app/test-mmo"
+node="/mnt/c/Program Files/nodejs/node.exe"
+if [[ -x $node && -d $repo/tools/sio-fixture/node_modules/socket.io ]]; then
+    win_host=$(ip route | awk '/default/{print $3; exit}')
+    rm -f "$app/sio.port" "$app/mmo.port"
+    "$node" "$(wslpath -w "$repo/tools/sio-fixture/server.js")" 0 0.0.0.0 > "$app/sio.port" & sio_fixture=$!
+    "$node" "$(wslpath -w "$repo/tools/sio-fixture/mmo-server.js")" 0 0.0.0.0 > "$app/mmo.port" 2> "$app/mmo-fixture.log" & mmo_fixture=$!
+    trap 'kill $fixture $fixture_tls $sio_fixture $mmo_fixture 2>/dev/null || true' EXIT
+    for _ in $(seq 150); do grep -q "[0-9]" "$app/sio.port" 2>/dev/null && grep -q "[0-9]" "$app/mmo.port" 2>/dev/null && break; sleep .1; done
+    PSTEROIDS_LIVE=${PSTEROIDS_LIVE:-} "$app/test-sio" "http://$win_host:$(tr -d '\r' < "$app/sio.port")"
+    "$app/test-mmo" "$repo/ps5/testdata/world_vectors.json" "http://$win_host:$(tr -d '\r' < "$app/mmo.port")"
+else
+    echo "Windows Node or tools/sio-fixture/node_modules missing: live socket.io tests skipped (npm install in tools/sio-fixture)"
+    "$app/test-sio"
+    "$app/test-mmo" "$repo/ps5/testdata/world_vectors.json"
+fi
+
 # Relink and repackage every time: link-title.sh also copies param.json and the icon,
 # and ninja would skip it when only metadata changed.
 rm -rf "$app/dist/PPSA99305" "$app/build/ps5/eboot.elf"

@@ -11,6 +11,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <atomic>
+#include <chrono>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -237,12 +238,13 @@ class Connection {
     static int bio_send(void *ctx, const unsigned char *buf, size_t len) {
         const ssize_t n = ::send(*static_cast<int *>(ctx), buf, len, 0);
         if (n >= 0) return int(n);
-        return errno == EAGAIN || errno == EWOULDBLOCK ? MBEDTLS_ERR_SSL_TIMEOUT : MBEDTLS_ERR_NET_SEND_FAILED;
+        return errno == EAGAIN || errno == EWOULDBLOCK ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_NET_SEND_FAILED;
     }
     static int bio_recv(void *ctx, unsigned char *buf, size_t len) {
         const ssize_t n = ::recv(*static_cast<int *>(ctx), buf, len, 0);
         if (n >= 0) return int(n);
-        return errno == EAGAIN || errno == EWOULDBLOCK ? MBEDTLS_ERR_SSL_TIMEOUT : MBEDTLS_ERR_NET_RECV_FAILED;
+        // A socket timeout is "no data yet": mbedTLS keeps its state and the call can be retried.
+        return errno == EAGAIN || errno == EWOULDBLOCK ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
     }
     static std::string tls_error(const char *what, int rc) {
         char text[160];
@@ -281,17 +283,25 @@ public:
             if (err) { error = "connect refused: " + std::to_string(err); return false; }
         }
         fcntl(fd, F_SETFL, flags);
+        set_timeout(timeout_ms);
+        return !to.tls || handshake(to, timeout_ms);
+    }
+
+    // Per-call socket timeout; receive() returns -2 when it expires.
+    void set_timeout(int timeout_ms) {
         timeval tv{timeout_ms / 1000, (timeout_ms % 1000) * 1000};
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-        return !to.tls || handshake(to);
     }
 
-    bool handshake(const Endpoint &to) {
+    bool handshake(const Endpoint &to, int timeout_ms) {
         tls = true;
         mbedtls_ssl_init(&ssl); mbedtls_ssl_config_init(&conf); mbedtls_x509_crt_init(&roots);
         mbedtls_ctr_drbg_init(&drbg); mbedtls_entropy_init(&entropy);
-        if (psa_crypto_init() != PSA_SUCCESS) { error = "TLS: crypto init failed"; return false; }
+        static std::once_flag crypto_once;
+        static psa_status_t crypto_status;
+        std::call_once(crypto_once, [] { crypto_status = psa_crypto_init(); });
+        if (crypto_status != PSA_SUCCESS) { error = "TLS: crypto init failed"; return false; }
         static const char personal[] = "psteroids5";
         int rc = mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy,
                                        reinterpret_cast<const unsigned char *>(personal), sizeof personal);
@@ -307,8 +317,13 @@ public:
             error = tls_error("TLS: setup failed", rc); return false;
         }
         mbedtls_ssl_set_bio(&ssl, &fd, bio_send, bio_recv, nullptr);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
         while ((rc = mbedtls_ssl_handshake(&ssl)) != 0) {
-            if (rc == MBEDTLS_ERR_SSL_WANT_READ || rc == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
+            if (rc == MBEDTLS_ERR_SSL_WANT_READ || rc == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                if (std::chrono::steady_clock::now() < deadline) continue;
+                error = "TLS handshake timed out";
+                return false;
+            }
             // TLS 1.3 servers may send a session ticket mid-handshake; nothing to do with it.
             if (rc == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET) continue;
             if (const uint32_t flags = mbedtls_ssl_get_verify_result(&ssl); flags && flags != uint32_t(-1)) {
@@ -336,20 +351,22 @@ public:
         return true;
     }
 
-    // Appends what arrives; 0 = peer closed, <0 = error (see error).
+    // Appends what arrives: >0 bytes, 0 = peer closed, -1 = error (see error), -2 = timeout.
     int receive(std::string &into) {
         char buffer[4096];
         for (;;) {
             if (!tls) {
                 const ssize_t n = ::recv(fd, buffer, sizeof buffer, 0);
-                if (n < 0) { error = errno == EAGAIN || errno == EWOULDBLOCK ? "response timed out" : "recv failed: " + std::to_string(errno); return -1; }
+                if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return -2;
+                if (n < 0) { error = "recv failed: " + std::to_string(errno); return -1; }
                 into.append(buffer, size_t(n));
                 return int(n);
             }
             const int n = mbedtls_ssl_read(&ssl, reinterpret_cast<unsigned char *>(buffer), sizeof buffer);
-            if (n == MBEDTLS_ERR_SSL_WANT_READ || n == MBEDTLS_ERR_SSL_WANT_WRITE || n == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET) continue;
+            if (n == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET) continue;
+            if (n == MBEDTLS_ERR_SSL_WANT_READ || n == MBEDTLS_ERR_SSL_WANT_WRITE) return -2;
             if (n == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || n == 0) return 0;
-            if (n < 0) { error = n == MBEDTLS_ERR_SSL_TIMEOUT ? "response timed out" : tls_error("TLS read failed", n); return -1; }
+            if (n < 0) { error = tls_error("TLS read failed", n); return -1; }
             into.append(buffer, size_t(n));
             return n;
         }
@@ -358,10 +375,6 @@ public:
 
 inline Response request(const Endpoint &to, const char *method, const std::string &path,
                         const std::string &json_body = {}, int timeout_ms = 6000) {
-    // mbedTLS is built without MBEDTLS_THREADING_C, so PSA crypto state is global:
-    // one request at a time across all worker threads.
-    static std::mutex serial;
-    std::lock_guard<std::mutex> lock(serial);
     Response out;
     Connection conn;
     if (!conn.open(to, timeout_ms)) { out.error = conn.error; return out; }
@@ -374,6 +387,7 @@ inline Response request(const Endpoint &to, const char *method, const std::strin
     std::string raw;
     for (;;) {
         const int n = conn.receive(raw);
+        if (n == -2) { out.error = "response timed out"; return out; }
         if (n < 0) { out.error = conn.error; return out; }
         if (n == 0 || response_complete(raw)) break;
         if (raw.size() > (1u << 21)) { out.error = "response too large"; return out; }

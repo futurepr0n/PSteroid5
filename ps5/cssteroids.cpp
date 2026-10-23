@@ -4,9 +4,14 @@
 #include "kit.hpp"
 
 namespace {
-enum class Screen { title, hangar, name, game };
-const char *const menu_items[] = {"PLAY", "HANGAR", "PILOT NAME", "REFRESH SCORES"};
-constexpr int menu_count = 4;
+// MULTIPLAYER = two-pilot campaign rooms (co-op); MMO = the drop-in shared world.
+enum class Screen { title, hangar, name, game, lobby, multiplayer };
+const char *const menu_items[] = {"PLAY", "MULTIPLAYER", "MMO", "HANGAR", "PILOT NAME", "REFRESH SCORES"};
+constexpr int menu_count = 6;
+enum class LobbyStep { menu, list, code, waiting };
+const char *const lobby_items[] = {"CREATE ROOM", "BROWSE OPEN ROOMS", "ENTER ROOM CODE"};
+const std::string code_chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+double wall_ms() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 const std::string name_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_.";
 constexpr int name_columns = 10, name_max = 16;
 }
@@ -19,6 +24,18 @@ class VulkanExample : public ps5ui::KitExample {
     std::string pilot = "PS5 Pilot";
     cssteroids::net::Endpoint server;
     cssteroids::net::AsyncRequest scoreFetch, galleryFetch, passFetch, submitRequest;
+    cssteroids::sio::Client socket;
+    cssteroids::mmo::Session mp;
+    bool mpWantJoin = false, coopMode = false;
+    std::string mpStatus;
+    // co-op rooms
+    cssteroids::coop::LobbyState lobby;
+    std::vector<cssteroids::coop::Room> rooms;
+    cssteroids::net::AsyncRequest roomRequest;
+    enum class RoomAction { none, create, list, verify } roomAction = RoomAction::none;
+    LobbyStep lobbyStep = LobbyStep::menu;
+    int lobbyMenu = 0, roomIndex = 0, joinedStarts = 0;
+    std::string codeDraft, lobbyStatus;
     std::vector<cssteroids::api::ScoreRow> board;
     std::vector<cssteroids::ShipDesign> gallery;
     std::string onlineStatus, hangarStatus, submitStatus;
@@ -174,8 +191,8 @@ class VulkanExample : public ps5ui::KitExample {
         centered("a CSSteroids port for PS5", 240, 28, 0x9fb3c8);
         for (int i = 0; i < menu_count; i++) {
             const bool on = i == menu;
-            if (on) scene.rounded_rect({760, 300.f + i * 56 - 36, 400, 48}, 8, hui::gfx::Color::rgb(0x2a4a6a, .8f));
-            centered(menu_items[i], 300.f + i * 56, 32, on ? 0xffffff : 0x9fb3c8);
+            if (on) scene.rounded_rect({760, 290.f + i * 44 - 33, 400, 42}, 8, hui::gfx::Color::rgb(0x2a4a6a, .8f));
+            centered(menu_items[i], 290.f + i * 44, 28, on ? 0xffffff : 0x9fb3c8);
         }
         char line[128];
         std::snprintf(line, sizeof line, "PILOT %s     SHIP %s     LOCAL BEST %d", pilot.c_str(), ship.name.c_str(), scores.best);
@@ -270,6 +287,311 @@ class VulkanExample : public ps5ui::KitExample {
         }
     }
 
+    // --- shared world (socket.io to the same server as the browser) ---------
+    void startMmo() {
+        screen = Screen::multiplayer;
+        coopMode = false;
+        mp = {};
+        if (!server.valid()) { mpStatus = "Offline: no server configured"; return; }
+        socket.connect(server);
+        mpWantJoin = true;
+        mpStatus = "Connecting to " + server.label() + " ...";
+    }
+    void startCoopLobby() {
+        screen = Screen::lobby;
+        coopMode = true;
+        mp = {}; lobby = {}; rooms.clear();
+        lobbyStep = LobbyStep::menu; lobbyMenu = 0; joinedStarts = 0;
+        mpWantJoin = false;
+        if (!server.valid()) { lobbyStatus = "Offline: no server configured"; return; }
+        socket.connect(server);
+        lobbyStatus = "Connecting to " + server.label() + " ...";
+    }
+    void stopMultiplayer() {
+        mp.leave();
+        for (auto &o : mp.take_outbox()) { if (o.hasData) socket.emit(o.name, o.data); else socket.emit(o.name); }
+        socket.close();
+        mpWantJoin = false;
+        coopMode = false;
+        screen = Screen::title;
+        requestScores();
+    }
+    void enterRoom(const std::string &roomId) {
+        lobby = {};
+        lobby.roomId = roomId;
+        socket.emit("join-simple-session", cssteroids::json::Value::string_value(roomId));
+        lobbyStep = LobbyStep::waiting;
+        lobbyStatus = "Joining room " + cssteroids::coop::room_code(roomId) + " ...";
+        say("PSteroids5 co-op: joining room %s", roomId.c_str());
+    }
+    void leaveRoom() {
+        if (!lobby.roomId.empty()) socket.emit("leave-session");
+        lobby = {};
+        lobbyStep = LobbyStep::menu;
+        lobbyStatus.clear();
+    }
+    // Room REST replies (create / list / verify a typed code).
+    void pollRooms() {
+        cssteroids::net::Response r;
+        if (!roomRequest.take(r)) return;
+        const RoomAction action = roomAction;
+        roomAction = RoomAction::none;
+        std::string error;
+        cssteroids::coop::Room room;
+        if (action == RoomAction::create) {
+            if (r.ok() && cssteroids::coop::parse_room_reply(r.body, room, error)) enterRoom(room.id);
+            else lobbyStatus = "Could not create a room: " + (r.ok() ? error : describe(r));
+        } else if (action == RoomAction::list) {
+            if (r.ok() && cssteroids::coop::parse_room_list(r.body, rooms)) {
+                roomIndex = 0;
+                lobbyStatus = rooms.empty() ? "No open rooms right now - create one and share its code" : std::to_string(rooms.size()) + " open rooms";
+            } else lobbyStatus = "Room list unavailable: " + describe(r);
+        } else if (action == RoomAction::verify) {
+            // The server creates rooms on the fly for unknown ids, so a typo must be caught here.
+            if (r.ok() && cssteroids::coop::parse_room_reply(r.body, room, error)) {
+                if (room.gameState == "playing") lobbyStatus = "That room's campaign has already started";
+                else enterRoom(room.id);
+            } else lobbyStatus = r.status == 404 ? "No room with code " + codeDraft : "Lookup failed: " + describe(r);
+        }
+    }
+    void lobbyInput(uint32_t pressed) {
+        using cssteroids::sio::Client;
+        const bool online = socket.state() == Client::State::connected;
+        if (socket.state() == Client::State::closed && (pressed & PAD_CROSS)) { startCoopLobby(); return; }
+        switch (lobbyStep) {
+            case LobbyStep::menu:
+                if (pressed & PAD_CIRCLE) { stopMultiplayer(); return; }
+                if (pressed & PAD_UP) lobbyMenu = (lobbyMenu + 2) % 3;
+                if (pressed & PAD_DOWN) lobbyMenu = (lobbyMenu + 1) % 3;
+                if ((pressed & PAD_CROSS) && online && !roomRequest.pending()) {
+                    if (lobbyMenu == 0) {
+                        roomAction = RoomAction::create;
+                        roomRequest.start(server, "POST", cssteroids::coop::create_path, cssteroids::coop::create_body(socket.sid()));
+                        lobbyStatus = "Creating a room ...";
+                    } else if (lobbyMenu == 1) {
+                        lobbyStep = LobbyStep::list; rooms.clear();
+                        roomAction = RoomAction::list;
+                        roomRequest.start(server, "GET", cssteroids::coop::rooms_path);
+                        lobbyStatus = "Looking for open rooms ...";
+                    } else { lobbyStep = LobbyStep::code; codeDraft.clear(); nameCursor = 0; lobbyStatus.clear(); }
+                }
+                break;
+            case LobbyStep::list: {
+                if (pressed & PAD_CIRCLE) { lobbyStep = LobbyStep::menu; lobbyStatus.clear(); return; }
+                const int n = int(rooms.size());
+                if (n && (pressed & PAD_UP)) roomIndex = (roomIndex + n - 1) % n;
+                if (n && (pressed & PAD_DOWN)) roomIndex = (roomIndex + 1) % n;
+                if ((pressed & PAD_TRIANGLE) && !roomRequest.pending()) {
+                    roomAction = RoomAction::list;
+                    roomRequest.start(server, "GET", cssteroids::coop::rooms_path);
+                    lobbyStatus = "Refreshing ...";
+                }
+                if (n && (pressed & PAD_CROSS)) enterRoom(rooms[size_t(roomIndex)].id);
+                break;
+            }
+            case LobbyStep::code: {
+                const int n = int(code_chars.size());
+                if (pressed & PAD_LEFT) nameCursor = (nameCursor + n - 1) % n;
+                if (pressed & PAD_RIGHT) nameCursor = (nameCursor + 1) % n;
+                if (pressed & PAD_UP) nameCursor = (nameCursor + n - name_columns) % n;
+                if (pressed & PAD_DOWN) nameCursor = (nameCursor + name_columns) % n;
+                if ((pressed & PAD_CROSS) && codeDraft.size() < 16) codeDraft += code_chars[size_t(nameCursor % n)];
+                if ((pressed & PAD_SQUARE) && !codeDraft.empty()) codeDraft.pop_back();
+                if (pressed & PAD_CIRCLE) { lobbyStep = LobbyStep::menu; lobbyStatus.clear(); }
+                if ((pressed & PAD_OPTIONS) && !codeDraft.empty() && online && !roomRequest.pending()) {
+                    roomAction = RoomAction::verify;
+                    roomRequest.start(server, "GET", std::string(cssteroids::coop::rooms_path) + "/" +
+                                      cssteroids::net::url_encode(cssteroids::coop::room_id_from_code(codeDraft)));
+                    lobbyStatus = "Checking room " + codeDraft + " ...";
+                }
+                break;
+            }
+            case LobbyStep::waiting:
+                if (pressed & PAD_CIRCLE) { leaveRoom(); return; }
+                if ((pressed & PAD_CROSS) && lobby.joined) { socket.emit("start-multiplayer-game"); lobbyStatus = "Starting the campaign ..."; }
+                break;
+        }
+    }
+    void drawLobby() {
+        using hui::gfx::Color;
+        centered("MULTIPLAYER", 150, 60);
+        centered("Two-pilot campaign: 10 rounds, 3 shared lives", 205, 26, 0x9fb3c8);
+        char line[160];
+        switch (lobbyStep) {
+            case LobbyStep::menu:
+                for (int i = 0; i < 3; i++) {
+                    const bool on = i == lobbyMenu;
+                    if (on) scene.rounded_rect({700, 330.f + i * 60 - 38, 520, 52}, 8, Color::rgb(0x2a4a6a, .8f));
+                    centered(lobby_items[i], 330.f + i * 60, 32, on ? 0xffffff : 0x9fb3c8);
+                }
+                centered("UP/DOWN  Select     CROSS  Confirm     CIRCLE  Back", 1045, 20, 0x8293ab);
+                break;
+            case LobbyStep::list:
+                centered("OPEN ROOMS", 300, 32, 0xffd700);
+                if (rooms.empty()) centered(roomRequest.pending() ? "..." : "None", 380, 28, 0x9fb3c8);
+                for (size_t i = 0; i < rooms.size() && i < 10; i++) {
+                    const bool on = int(i) == roomIndex;
+                    if (on) scene.rounded_rect({660, 360.f + i * 50 - 34, 600, 46}, 8, Color::rgb(0x2a4a6a, .8f));
+                    std::snprintf(line, sizeof line, "ROOM %s     %d / %d pilots", cssteroids::coop::room_code(rooms[i].id).c_str(), rooms[i].currentPlayers, rooms[i].maxPlayers);
+                    centered(line, 360.f + i * 50, 28, on ? 0xffffff : 0x9fb3c8);
+                }
+                centered("UP/DOWN  Select     CROSS  Join     TRIANGLE  Refresh     CIRCLE  Back", 1045, 20, 0x8293ab);
+                break;
+            case LobbyStep::code:
+                centered("ROOM CODE", 300, 32, 0xffd700);
+                centered(codeDraft + (int(game.time * 2) % 2 ? "_" : " "), 380, 48);
+                for (size_t i = 0; i < code_chars.size(); i++) {
+                    const float x = 660 + float(i % name_columns) * 64, y = 480 + float(i / name_columns) * 72;
+                    const bool on = int(i) == nameCursor;
+                    if (on) scene.rounded_rect({x - 26, y - 44, 52, 60}, 8, Color::rgb(0x2a4a6a));
+                    centered(std::string(1, char(std::toupper((unsigned char)code_chars[i]))), y, 36, on ? 0xffffff : 0x9fb3c8, x);
+                }
+                centered("D-PAD  Move     CROSS  Add     SQUARE  Delete     OPTIONS  Join     CIRCLE  Back", 1045, 20, 0x8293ab);
+                break;
+            case LobbyStep::waiting: {
+                std::string code = cssteroids::coop::room_code(lobby.roomId);
+                for (auto &c : code) c = char(std::toupper((unsigned char)c));
+                centered("ROOM CODE", 330, 30, 0xffd700);
+                centered(code, 420, 72);
+                centered("Share this code: the other pilot picks MULTIPLAYER > ENTER ROOM CODE (or finds it in BROWSE)", 480, 22, 0x9fb3c8);
+                std::snprintf(line, sizeof line, "%d / %d PILOTS IN THE ROOM", std::max(lobby.playerCount, lobby.joined ? 1 : 0), cssteroids::coop::room_size);
+                centered(line, 580, 34, lobby.playerCount >= 2 ? 0x70e8a0 : 0xffffff);
+                centered(lobby.playerCount >= 2 ? "CROSS  Start the campaign" : "CROSS  Start solo (or wait for a second pilot)", 660, 28, 0xffd700);
+                centered("CIRCLE  Leave room", 1045, 20, 0x8293ab);
+                break;
+            }
+        }
+        if (!lobby.error.empty()) centered("Server: " + lobby.error, 950, 22, 0xf0c07d);
+        centered(lobbyStatus, 1000, 22, 0x83bed4);
+    }
+    void pumpMultiplayer(const cssteroids::Controls &in, float dt) {
+        using cssteroids::sio::Client;
+        const double now = wall_ms();
+        const auto state = socket.state();
+        if (state == Client::State::connected && mpWantJoin) {
+            mp.begin_join(now, pilot, ship);
+            mpWantJoin = false;
+            say("PSteroids5 mmo: socket %s, joining as %s", socket.sid().c_str(), pilot.c_str());
+        }
+        cssteroids::sio::Event ev;
+        while (socket.poll(ev)) {
+            if (coopMode && lobby.handle(ev.name, ev.data)) continue;
+            mp.handle(ev.name, ev.data, wall_ms());
+        }
+        if (coopMode) {
+            pollRooms();
+            if (screen == Screen::lobby && state == Client::State::connected && lobbyStatus.rfind("Connecting", 0) == 0) lobbyStatus = "Connected";
+            if (lobbyStep == LobbyStep::waiting && lobby.joined && lobbyStatus.rfind("Joining room", 0) == 0) lobbyStatus = "In room";
+            // game-started (first start or a replay): everyone joins the room's co-op world
+            if (lobby.starts > joinedStarts) {
+                joinedStarts = lobby.starts;
+                mp = {};
+                mp.begin_join(now, pilot, ship, lobby.roomId);
+                screen = Screen::multiplayer;
+                say("PSteroids5 co-op: campaign started in room %s", lobby.roomId.c_str());
+            }
+        }
+        mp.update(in, now, dt);
+        auto out = mp.take_outbox();
+        if (state == Client::State::connected) for (auto &o : out) { if (o.hasData) socket.emit(o.name, o.data); else socket.emit(o.name); }
+        if (screen == Screen::lobby) return; // the lobby shows its own status
+        // status line; every change also goes to klog
+        std::string status;
+        if (!server.valid()) status = "Offline: no server configured";
+        else if (state == Client::State::closed) status = "Disconnected: " + socket.error() + "   CROSS to reconnect";
+        else if (state == Client::State::connecting) status = "Connecting to " + server.label() + " ...";
+        else if (mp.phase == cssteroids::mmo::Phase::failed) status = "Could not join: " + mp.failure + "   CROSS to retry";
+        else if (mp.phase == cssteroids::mmo::Phase::joining) status = "Joining the world ...";
+        else if (mp.phase == cssteroids::mmo::Phase::warping) status = "Warping in ...";
+        else { char line[96]; std::snprintf(line, sizeof line, "ONLINE  %zu pilots   %.0f ms", mp.players.size() + 1, mp.rtt()); status = line; }
+        if (status != mpStatus) { say("PSteroids5 %s: %s", coopMode ? "co-op" : "mmo", status.c_str()); mpStatus = status; }
+    }
+    void multiplayerInput(uint32_t pressed) {
+        using cssteroids::sio::Client;
+        if (pressed & PAD_CIRCLE) { stopMultiplayer(); return; }
+        if (coopMode && mp.coopOver && (pressed & PAD_CROSS)) { socket.emit("start-multiplayer-game"); return; } // replay in the same room
+        if ((pressed & PAD_CROSS) && server.valid() && (socket.state() == Client::State::closed || mp.phase == cssteroids::mmo::Phase::failed))
+            coopMode ? startCoopLobby() : startMmo();
+    }
+    void drawMultiplayer() {
+        using hui::gfx::Color;
+        const double now = wall_ms();
+        // camera: follow the ship, clamped to the world (centred when the world is smaller)
+        const float W = float(mp.bounds.width), H = float(mp.bounds.height);
+        const float camX = W <= 1920 ? (W - 1920) / 2 : std::clamp(float(mp.x) - 960, 0.f, W - 1920);
+        const float camY = H <= 1080 ? (H - 1080) / 2 : std::clamp(float(mp.y) - 540, 0.f, H - 1080);
+        auto sx = [&](double x) { return float(x) - camX; };
+        auto sy = [&](double y) { return float(y) - camY; };
+        auto visible = [&](double x, double y, double r) { return sx(x) > -r && sx(x) < 1920 + r && sy(y) > -r && sy(y) < 1080 + r; };
+        const uint32_t edge = 0x3a6d99;
+        scene.line(sx(0), sy(0), sx(W), sy(0), 3, Color::rgb(edge)); scene.line(sx(W), sy(0), sx(W), sy(H), 3, Color::rgb(edge));
+        scene.line(sx(W), sy(H), sx(0), sy(H), 3, Color::rgb(edge)); scene.line(sx(0), sy(H), sx(0), sy(0), 3, Color::rgb(edge));
+        for (const auto &[id, a] : mp.asteroids) {
+            if (!mp.asteroid_visible(a)) continue;
+            double ax, ay, rot;
+            mp.asteroid_render_pos(a, now, ax, ay, rot);
+            if (!visible(ax, ay, a.radius)) continue;
+            float pts[16];
+            for (int i = 0; i < a.vertices; i++) {
+                const double ang = i * cssteroids::mmo::tau / a.vertices + rot;
+                pts[i * 2] = sx(ax + a.offsets[i] * std::cos(ang)); pts[i * 2 + 1] = sy(ay + a.offsets[i] * std::sin(ang));
+            }
+            for (int i = 0; i < a.vertices; i++) { const int j = (i + 1) % a.vertices; scene.line(pts[i * 2], pts[i * 2 + 1], pts[j * 2], pts[j * 2 + 1], 2.5f, Color::rgb(0xffffff)); }
+        }
+        // enemies: enemy.js outline; their angle is math convention (0 = right)
+        for (const auto &[id, e] : mp.enemies) {
+            if (e.outOfView || !visible(e.x, e.y, 20)) continue;
+            const float c = std::cos(float(e.a)), sn = std::sin(float(e.a));
+            auto at = [&](float px, float py) { return std::array<float, 2>{sx(e.x) + px * c - py * sn, sy(e.y) + px * sn + py * c}; };
+            const std::array<float, 2> hull[4] = {at(15, 0), at(-10, -10), at(-5, 0), at(-10, 10)};
+            for (int i = 0; i < 4; i++) scene.line(hull[i][0], hull[i][1], hull[(i + 1) % 4][0], hull[(i + 1) % 4][1], 2, Color::rgb(0xff3030));
+            scene.circle(sx(e.x), sy(e.y), 2, Color::rgb(0xff0000));
+        }
+        for (const auto &b : mp.bullets) {
+            if (!visible(b.x, b.y, 4)) continue;
+            const uint32_t col = b.hostile ? 0xff2020 : b.owner.empty() ? 0xff4500 : 0xffd700;
+            scene.line(sx(b.x), sy(b.y), sx(b.x - std::sin(b.angle) * 10), sy(b.y + std::cos(b.angle) * 10), 3, Color::rgb(col, .6f));
+            scene.circle(sx(b.x), sy(b.y), 3, Color::rgb(col));
+        }
+        for (const auto &bu : mp.bursts) {
+            const float r = float(bu.age) * (bu.big ? 90.f : 40.f);
+            scene.ring(sx(bu.x), sy(bu.y), r, 2, Color::rgb(0xffa040, float(1 - bu.age)));
+        }
+        for (const auto &[id, p] : mp.players) {
+            if (p.dead || p.outOfView || !visible(p.x, p.y, 40)) continue;
+            drawShip(p.geometry, sx(p.x), sy(p.y), float(p.angle), 1, p.thrust);
+            centered(p.name, sy(p.y) - 30, 18, 0x9fd3ff, sx(p.x));
+        }
+        const bool blink = mp.invulnerableMs > 0 && int(now / 100) % 2;
+        if (!mp.dead && !blink && mp.phase == cssteroids::mmo::Phase::playing) drawShip(ship.geometry, sx(mp.x), sy(mp.y), float(mp.angle), 1, mp.thrusting);
+        if (mp.phase == cssteroids::mmo::Phase::warping) scene.ring(sx(mp.x), sy(mp.y), 30 + 10 * std::sin(float(now) / 120), 2, Color::rgb(0x70caff));
+        int mine = 0;
+        for (const auto &e2 : mp.scores) if (e2.id == mp.myId) mine = e2.score;
+        char line[128];
+        std::snprintf(line, sizeof line, "Score: %d", mine); text(line, 40, 60, 30);
+        text(mp.mode == "coop" ? "CO-OP" : "SHARED WORLD", 860, 60, 26, 0x9fb3c8);
+        if (mp.mode == "coop") { std::snprintf(line, sizeof line, "Round %d/%d   Lives %d", mp.round, mp.maxRounds, mp.lives); text(line, 1500, 60, 26); }
+        text("LEADERBOARD", 1640, 120, 20, 0xffd700);
+        for (size_t i = 0; i < mp.scores.size() && i < 6; i++) {
+            std::snprintf(line, sizeof line, "%zu. %s  %d", i + 1, mp.scores[i].name.c_str(), mp.scores[i].score);
+            text(line, 1640, 150 + i * 26.f, 18, mp.scores[i].id == mp.myId ? 0x70e8a0 : 0xc8d2dc);
+        }
+        if (mp.dead && mp.phase == cssteroids::mmo::Phase::playing) {
+            std::snprintf(line, sizeof line, "RESPAWNING IN %d", std::max(1, int(std::ceil(mp.respawnCountdownMs / 1000))));
+            centered(line, 520, 48, 0xf47366);
+        }
+        if (mp.bannerMs > 0) centered(mp.banner, 300, 44, 0x83bed4);
+        if (coopMode && mp.coopOver) {
+            scene.rounded_rect({0, 0, 1920, 1080}, 0, Color::rgb(0x000000, .65f));
+            centered(mp.coopWon ? "MISSION COMPLETE" : "GAME OVER", 440, 68, mp.coopWon ? 0x70e8a0 : 0xf47366);
+            std::snprintf(line, sizeof line, "TEAM SCORE %d     ROUND %d / %d", mp.teamScore, mp.round, mp.maxRounds);
+            centered(line, 520, 32);
+            centered("CROSS  Play again in this room     CIRCLE  Leave", 600, 26, 0x9fb3c8);
+        }
+        centered(mpStatus, 1000, 22, mp.phase == cssteroids::mmo::Phase::playing ? 0x83bed4 : 0xf0c07d);
+        text("STICK / D-PAD  Turn     R2 / UP  Thrust     CROSS / R1  Fire     CIRCLE  Leave world", 40, 1050, 20, 0x8293ab);
+    }
+
     // --- input --------------------------------------------------------------
     void startGame() {
         screen = Screen::game; paused = false; savedRun = false; submitted = false; submitStatus.clear();
@@ -281,8 +603,10 @@ class VulkanExample : public ps5ui::KitExample {
         if (!(pressed & PAD_CROSS)) return;
         switch (menu) {
             case 0: startGame(); break;
-            case 1: screen = Screen::hangar; if (gallery.empty()) requestGallery(); break;
-            case 2: screen = Screen::name; nameDraft = pilot; nameCursor = 0; break;
+            case 1: startCoopLobby(); break;
+            case 2: startMmo(); break;
+            case 3: screen = Screen::hangar; if (gallery.empty()) requestGallery(); break;
+            case 4: screen = Screen::name; nameDraft = pilot; nameCursor = 0; break;
             default: requestScores(); break;
         }
     }
@@ -367,8 +691,10 @@ public:
                 case Screen::hangar: hangarInput(pressed); break;
                 case Screen::name: nameInput(pressed); break;
                 case Screen::game: gameInput(pressed); break;
+                case Screen::multiplayer: multiplayerInput(pressed); break;
+                case Screen::lobby: lobbyInput(pressed); break;
             }
-            exitHold = (pad.held & PAD_OPTIONS) && screen != Screen::name ? exitHold + dt : 0;
+            exitHold = (pad.held & PAD_OPTIONS) && screen != Screen::name && !(screen == Screen::lobby && lobbyStep == LobbyStep::code) ? exitHold + dt : 0;
             if (exitHold >= 1.25f) quit = true;
         }
         if (intercepted) exitHold = 0;
@@ -380,6 +706,7 @@ public:
             in.thrust = pad.r2 > .2f || (pad.held & PAD_UP) || pad.left_y < -.6f;
             in.fire = (pad.held & (PAD_CROSS | PAD_R1 | PAD_SQUARE)) != 0;
         }
+        if (screen == Screen::multiplayer || screen == Screen::lobby) pumpMultiplayer(intercepted || screen == Screen::lobby ? cssteroids::Controls{} : in, dt);
         if (screen == Screen::game && !paused && !intercepted) {
             accumulator = std::min(accumulator + dt, 6 * cssteroids::step_seconds);
             while (accumulator >= cssteroids::step_seconds) { game.step(in); accumulator -= cssteroids::step_seconds; }
@@ -396,6 +723,8 @@ public:
             case Screen::hangar: drawHangar(); break;
             case Screen::name: drawNameEntry(); break;
             case Screen::game: drawWorld(); drawHud(); break;
+            case Screen::multiplayer: drawMultiplayer(); break;
+            case Screen::lobby: drawLobby(); break;
         }
         if (exitHold > .25f) centered("Hold OPTIONS to exit", 60, 25, 0xf0c07d);
         kit.renderer.begin(); kit.renderer.draw(scene);

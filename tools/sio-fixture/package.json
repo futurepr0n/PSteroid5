@@ -1,0 +1,6 @@
+{
+  "name": "psteroids5-sio-fixture",
+  "private": true,
+  "description": "Dev-only socket.io server for PSteroids5 client tests (same major version as CSSteroids-2's server).",
+  "dependencies": { "socket.io": "4.8.1" }
+}

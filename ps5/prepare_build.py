@@ -10,7 +10,7 @@ TITLE_ID = 'PPSA99305'
 CONTENT_ID = 'UP9000-PPSA99305_00-CSSTEROIDSPS5000'
 VERSION = '01.000.000'
 PORT_REVISION = 'm3-https-server-api-2026-10-23'
-HEADERS = ['asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp']
+HEADERS = ['asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp', 'socketio.hpp', 'mmo_world.hpp', 'coop_lobby.hpp']
 
 repo = Path(sys.argv[1]).resolve()
 work = Path.home() / 'work'

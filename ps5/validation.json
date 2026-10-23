@@ -1,9 +1,9 @@
 {
   "status": "passed",
   "console_tested": false,
-  "verified_utc": "2026-10-23T16:37:45.314424+00:00",
+  "verified_utc": "2026-10-23T17:24:27.256686+00:00",
   "title_id": "PPSA99305",
-  "eboot_sha256": "5197a5d264cb3918f6bb885fe745a629f86497418e71bd8c9edf6db801fee136",
+  "eboot_sha256": "9439a93d733e31737ae68915d662a03bd9fbaa105b053d4b69664c6182e23572",
   "checks": [
     "folder/title/content ID agreement",
     "packaged SELF magic (full integrity checked by native linker tool)",
@@ -30,8 +30,8 @@
     "assets/LICENSES/PressStart2P-LICENSE.txt": "705960c3281a5765ecc0b59bd4ed7ca59eed165748076bc2fc3e8fdbfeb944b0",
     "assets/NOTICES.txt": "a2d3022b7f04d4d5b3d1dc6d57b00e59ef50cca5316c1c5fbde0fcb9dedd0231",
     "assets/Roboto-Medium.ttf": "8559132c89ad51d8a2ba5b171887a44a7ba93776e205f553573de228e64b45f8",
-    "build-provenance.json": "4e59844b998b8cfde2fde69e2ede686bd2b278bf540b5deaa433a8c1aed14615",
-    "eboot.bin": "5197a5d264cb3918f6bb885fe745a629f86497418e71bd8c9edf6db801fee136",
+    "build-provenance.json": "58e2375f9cac39a35fcfb6258a5dcf986cdb4c5683ae6787d72b252a8b106165",
+    "eboot.bin": "9439a93d733e31737ae68915d662a03bd9fbaa105b053d4b69664c6182e23572",
     "GAME_README.md": "059dc422e6e66fb6dc58d15e00f19ef961dad61b8d4cbd3c2e02be604e2cd888",
     "licenses/GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
     "licenses/Mesa-license.rst": "0d1a0472ecc81830e75c20d59b0ea02841e3db21255e0ebad97ab682c54d6615",

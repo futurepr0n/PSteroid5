@@ -8,6 +8,11 @@
 #define MBEDTLS_NO_PLATFORM_ENTROPY
 #define MBEDTLS_ENTROPY_HARDWARE_ALT
 
+/* HTTP requests and the multiplayer socket run TLS on different threads at once;
+ * mbedTLS 3.6 makes PSA crypto and the RNG thread-safe with this. */
+#define MBEDTLS_THREADING_C
+#define MBEDTLS_THREADING_PTHREAD
+
 /* No files, no mbedTLS networking or timing: net_http.hpp owns the socket. */
 #undef MBEDTLS_FS_IO
 #undef MBEDTLS_NET_C
