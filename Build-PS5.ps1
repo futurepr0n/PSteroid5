@@ -1,3 +1,5 @@
+# -LiveServer https://asteroids.futurepr0n.com adds read-only GETs against that server to the tests.
+param([string]$LiveServer='')
 $ErrorActionPreference='Stop'
 $repo=$PSScriptRoot
 $linuxRepo=(wsl.exe -d Ubuntu -- wslpath -a $repo.Replace('\','/')).Trim()
@@ -6,7 +8,7 @@ try {
     # Windows PowerShell can treat ordinary native stderr (test progress/warnings)
     # as a terminating error under redirection. Trust the process exit status.
     $ErrorActionPreference='Continue'
-    wsl.exe -d Ubuntu -- bash "$linuxRepo/ps5/build.sh"
+    wsl.exe -d Ubuntu -- env "PSTEROIDS_LIVE=$LiveServer" bash "$linuxRepo/ps5/build.sh"
     $buildExit=$LASTEXITCODE
 } finally { $ErrorActionPreference=$nativePreference }
 if($buildExit -ne 0) { throw "PS5 build failed (exit $buildExit)." }

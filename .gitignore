@@ -2,3 +2,4 @@
 dist/
 *.log
 __pycache__/
+deploy-logs/

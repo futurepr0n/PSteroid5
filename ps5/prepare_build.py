@@ -9,8 +9,8 @@ import json, shutil, subprocess, sys, hashlib
 TITLE_ID = 'PPSA99305'
 CONTENT_ID = 'UP9000-PPSA99305_00-CSSTEROIDSPS5000'
 VERSION = '01.000.000'
-PORT_REVISION = 'm1-m2-launch-network-spike-2026-10-23'
-HEADERS = ['asteroids_core.hpp', 'json_lite.hpp', 'net_http.hpp', 'server_api.hpp', 'score_store.hpp']
+PORT_REVISION = 'm3-https-server-api-2026-10-23'
+HEADERS = ['asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp']
 
 repo = Path(sys.argv[1]).resolve()
 work = Path.home() / 'work'
@@ -30,7 +30,24 @@ cmake = app / 'ps5/CMakeLists.txt'
 code = cmake.read_text()
 for source in ['probe_rpcs3.cpp', 'ps5_dl.c', 'ps5_fastclock.c', 'ps5_tuning.c', 'import_check.c']:
     code = code.replace('\tsrc/' + source + '\n', '')
+# mbedTLS (vendored, unmodified) as its own object library, linked into the title.
+code = code.replace('# Link, sign and package', '''# PSteroids5: mbedTLS for the HTTPS client (third_party/mbedtls, Apache-2.0)
+file(GLOB mbedtls_sources ${ROOT}/mbedtls/library/*.c)
+add_library(mbedtls_ps5 OBJECT ${mbedtls_sources} src/tls_entropy.c)
+target_include_directories(mbedtls_ps5 PRIVATE ${ROOT}/mbedtls/include ${ROOT}/mbedtls/library src)
+target_compile_definitions(mbedtls_ps5 PRIVATE MBEDTLS_USER_CONFIG_FILE="tls_config.h")
+target_compile_options(mbedtls_ps5 PRIVATE -O2 -w -ffunction-sections -fdata-sections)
+set_target_properties(mbedtls_ps5 PROPERTIES C_STANDARD 11)
+target_include_directories(samples PRIVATE ${ROOT}/mbedtls/include)
+target_compile_definitions(samples PRIVATE MBEDTLS_USER_CONFIG_FILE="tls_config.h")
+
+# Link, sign and package''', 1)
+objects = '"$<TARGET_OBJECTS:samples>"'
+assert code.count(objects) == 2, 'link command layout changed'
+code = code.replace(objects, objects + ' "$<TARGET_OBJECTS:mbedtls_ps5>"')
+code = code.replace('DEPENDS samples ', 'DEPENDS samples mbedtls_ps5 ', 1)
 cmake.write_text(code)
+shutil.copytree(repo / 'third_party/mbedtls', app / 'mbedtls', dirs_exist_ok=True)
 prelude = app / 'ps5/src/prelude.h'
 code = '\n'.join(line for line in prelude.read_text().splitlines() if '../../examples/rpcs3ps5/' not in line)
 prelude.write_text(code + '\n' + ''.join(f'#include "{h}"\n' for h in HEADERS))
@@ -38,7 +55,8 @@ samples = app / 'ps5/src/samples.cpp'
 samples.write_text(samples.read_text().replace('rpcs3ps5', 'cssteroids')
                    .replace('KB-RPCS3 Alpha 0.1.0', 'Native PS5 Asteroids').replace('KB-RPCS3', 'CSSteroids'))
 copies = [('main.cpp', 'ps5/src/main.cpp'), ('cssteroids.cpp', 'examples/cssteroids/cssteroids.cpp'),
-          ('link-title.sh', 'ps5/tools/link-title.sh')] + [(h, 'ps5/src/' + h) for h in HEADERS]
+          ('link-title.sh', 'ps5/tools/link-title.sh'),
+          ('tls_entropy.c', 'ps5/src/tls_entropy.c'), ('tls_config.h', 'ps5/src/tls_config.h')] + [(h, 'ps5/src/' + h) for h in HEADERS]
 for src, dst in copies:
     target = app / dst; target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes((repo / 'ps5' / src).read_bytes().replace(b'\r\n', b'\n'))

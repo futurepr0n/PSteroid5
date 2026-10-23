@@ -35,5 +35,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.reply(201 if self.path == '/api/high-scores' else 404, body)
 
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+if len(sys.argv) == 3:  # fixture_server.py CERT KEY: HTTPS with an untrusted certificate
+    import ssl
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(sys.argv[1], sys.argv[2])
+    server.socket = context.wrap_socket(server.socket, server_side=True)
 print(server.server_address[1], flush=True)
 server.serve_forever()

@@ -97,6 +97,37 @@ int main() {
         }
         CHECK(g.over && g.lives == 0);
     }
+    // Weapon points: one round per point, rotated with the ship, 0.75x speed when several
+    {
+        Game g(11); g.asteroids.clear();
+        g.geometry.weapons = {{-10, 0}, {10, 0}};
+        g.ship.angle = pi / 2; // facing right: ship-space +x maps to screen +y
+        Controls c; c.fire = true;
+        g.step(c);
+        CHECK(g.bullets.size() == 2);
+        CHECK(std::fabs(g.bullets[0].y - (board_height / 2 - 10)) < 1e-3f && std::fabs(g.bullets[1].y - (board_height / 2 + 10)) < 1e-3f);
+        CHECK(g.bullets[0].initialSpeed == 4.5f && g.bullets[0].maxLife == 1.05f);
+        g.geometry.weapons = {{0, -20}};
+        g.bullets.clear(); g.ship.shootTimer = 0; g.step(c);
+        CHECK(g.bullets.size() == 1 && g.bullets[0].initialSpeed == 6.f);
+    }
+    // Custom ships collide by their rotated lines, not the 15 px circle
+    {
+        Game g(12);
+        g.geometry.shape = ShipShape::custom;
+        g.geometry.lines = {{0, -60, 0, 0, 0xffffff}}; // a long nose spike straight up
+        g.asteroids.resize(1);
+        auto &a = g.asteroids[0]; a.vx = a.vy = 0; a.radius = 15;
+        a.x = g.ship.x; a.y = g.ship.y - 65;        // touches the spike tip, far outside 15+15
+        g.step({});
+        CHECK(g.ship.exploding);
+        Game h(12);
+        h.geometry = g.geometry; h.ship.angle = pi;  // spike now points down
+        h.asteroids.resize(1);
+        auto &b = h.asteroids[0]; b.vx = b.vy = 0; b.radius = 15; b.x = h.ship.x; b.y = h.ship.y - 65;
+        h.step({});
+        CHECK(!h.ship.exploding);
+    }
     // Long seeded runs stay finite and bounded
     {
         Game g(9);

@@ -1,3 +1,11 @@
-# CSSteroids server address for the PS5 title (numeric IPv4, port defaults to 6161).
+# PSteroids5 server address: the first non-comment line is used.
 # Copy to /data/cssteroids-ps5/server.txt (preferred) or beside eboot.bin as server.txt.
-192.168.1.50:6161
+#
+# Production (HTTPS, verified against the bundled Let's Encrypt roots):
+https://asteroids.futurepr0n.com
+#
+# If DNS fails on the console, or the PS5 cannot reach the public address from
+# inside the LAN (no NAT hairpin), add an IP after it; the certificate name still
+# comes from the host:   https://asteroids.futurepr0n.com 192.168.1.20
+#
+# Local development server (plain HTTP):   http://192.168.1.50:6161

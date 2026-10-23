@@ -25,7 +25,28 @@ struct Rng {
     }
 };
 
-enum class ShipShape { standard, triangle, diamond };
+enum class ShipShape { standard, triangle, diamond, custom };
+
+struct Point { float x = 0, y = 0; };
+struct Segment { float x1, y1, x2, y2; uint32_t color; };
+
+// A ship's look and gameplay geometry, in ship space (angle 0 = up, already at
+// the browser's 0.25 design scale). Built from server/customizer JSON elsewhere.
+struct ShipGeometry {
+    ShipShape shape = ShipShape::standard;
+    uint32_t color = 0xffffff;
+    std::vector<Segment> lines;    // custom ships only
+    std::vector<Point> weapons;    // empty: one round from the nose
+    std::vector<Point> thrusters;  // empty: default flame position(s)
+    bool custom() const { return shape == ShipShape::custom && !lines.empty(); }
+};
+
+inline bool segment_hits_circle(float x1, float y1, float x2, float y2, float cx, float cy, float r) {
+    const float dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
+    float t = len2 > 0 ? ((cx - x1) * dx + (cy - y1) * dy) / len2 : 0;
+    t = std::clamp(t, 0.f, 1.f);
+    return std::hypot(x1 + t * dx - cx, y1 + t * dy - cy) <= r;
+}
 
 struct Controls {
     float turn = 0;      // -1 left .. 1 right; 1 == Ship.rotationSpeed per frame
@@ -72,6 +93,7 @@ class Game {
 public:
     Rng rng;
     Ship ship;
+    ShipGeometry geometry;
     std::vector<Asteroid> asteroids;
     std::vector<Bullet> bullets;
     std::vector<Debris> debris;
@@ -172,13 +194,36 @@ private:
         if (s.invulnerableTime > 0) s.invulnerableTime -= step_seconds;
         if (in.fire && s.shootTimer <= 0) {
             s.shootTimer = .25f;
-            // WorldSim.createShotBullets without weapon points: one round from the nose
-            const float sn = std::sin(s.angle), cs = std::cos(s.angle);
-            Bullet b{s.x + sn * s.radius, s.y - cs * s.radius, s.angle, 6, 6, 0, 1.5f};
-            b.vx0 = s.vx * .5f; b.vy0 = s.vy * .5f;
-            bullets.push_back(b);
+            fire_from(s);
             events.push_back(Event::shot);
         }
+    }
+
+    // WorldSim.createShotBullets + Bullet (single-player speeds): one round from
+    // the nose, or one per weapon point with 0.75x speed and 0.7x life when several.
+    void fire_from(const Ship &s) {
+        const float sn = std::sin(s.angle), cs = std::cos(s.angle);
+        const bool multi = geometry.weapons.size() > 1;
+        const float speed = multi ? 4.5f : 6.f, life = multi ? 1.05f : 1.5f;
+        auto add = [&](float x, float y) {
+            Bullet b{x, y, s.angle, speed, speed, 0, life};
+            b.vx0 = s.vx * .5f; b.vy0 = s.vy * .5f;
+            bullets.push_back(b);
+        };
+        if (geometry.weapons.empty()) add(s.x + sn * s.radius, s.y - cs * s.radius);
+        for (const auto &p : geometry.weapons) add(s.x + p.x * cs - p.y * sn, s.y + p.x * sn + p.y * cs);
+    }
+
+    // Ship.checkCollision: custom ships test each rotated line, then a centre-in-radius fallback.
+    bool ship_hits(float cx, float cy, float r) const {
+        const Ship &s = ship;
+        if (!geometry.custom()) return std::hypot(s.x - cx, s.y - cy) < s.radius + r;
+        const float c = std::cos(s.angle), sn = std::sin(s.angle);
+        for (const auto &l : geometry.lines) {
+            if (segment_hits_circle(s.x + l.x1 * c - l.y1 * sn, s.y + l.x1 * sn + l.y1 * c,
+                                    s.x + l.x2 * c - l.y2 * sn, s.y + l.x2 * sn + l.y2 * c, cx, cy, r)) return true;
+        }
+        return std::hypot(s.x - cx, s.y - cy) < s.radius;
     }
 
     void respawn() {
@@ -218,7 +263,7 @@ private:
     void collide() {
         if (!ship.exploding && !ship.invulnerable()) {
             for (const auto &a : asteroids) {
-                if (std::hypot(ship.x - a.x, ship.y - a.y) < ship.radius + a.radius) {
+                if (ship_hits(a.x, a.y, a.radius)) {
                     ship.exploding = true; ship.explodeTime = 0;
                     burst(ship.x, ship.y, 20, true);
                     events.push_back(Event::ship_hit);
