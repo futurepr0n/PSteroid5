@@ -151,8 +151,21 @@ static void offline() {
     out = s.take_outbox();
     int shots = 0; for (auto &o : out) if (o.name == "mmo-shoot") { shots++; CHECK(o.data.get("tick") && o.data.num("angle") == s.angle); }
     CHECK(shots == 2 && s.bullets.size() >= before + 2);
-    // remote player is interpolated from the buffer
+    // remote player is interpolated from the buffer (old-format entries: no velocity, so it holds)
     CHECK(std::fabs(s.players["bob"].x - 1220) < 1e-9);
+    {   // velocity entries glide past the newest sample, at most max_extrapolate_ticks, as world-sim.js
+        SnapshotBuffer buf(100, 1);
+        buf.push(10, "a", 0, 0, 0, false, true, 2, -1);
+        buf.push(11, "a", 6, -3, 0, false, true, 2, -1);
+        Sample g;
+        CHECK(buf.sample("a", 11.5, g) && g.x == 6 + 2 * 3 * 0.5 && g.y == -3 - 3 * 0.5);
+        CHECK(buf.sample("a", 20, g) && g.x == 6 + 2 * 3 * max_extrapolate_ticks);
+        buf.push(30, "a", 6, -3, 0, false, false, 2, -1); // the gap inserts a held sample with no velocity
+        CHECK(buf.sample("a", 25, g) && g.x == 6);
+        SnapshotBuffer dead(100, 1);
+        dead.push(10, "d", 5, 5, 0, true, false, 3, 3);
+        CHECK(dead.sample("d", 11, g) && g.x == 5);
+    }
     // asteroid destroyed at tick 150: two children with world-sim ids/ticks
     s.handle("mmo-asteroid-destroyed", arr({8, 150, 1}), now);
     CHECK(s.asteroids.count(8) == 0 && s.asteroids.count(child_id(8, 0)) == 1 && s.asteroids.count(child_id(8, 1)) == 1);
@@ -372,6 +385,18 @@ static void coop_live(const char *server) {
     CHECK(sa.players.count(sb.myId) == 1 && sb.players.count(sa.myId) == 1);
     std::printf("co-op live: room %s, both pilots in round %d with %d shared lives, %zu asteroids\n",
                 room_code(room.id).c_str(), sa.round, sa.lives, sa.asteroids.size());
+    // B flies; a server with remote-player smoothing appends velocity, which A's client picks up
+    Controls fly; fly.thrust = true; fly.turn = 0.3f;
+    for (double end = now() + 1500; now() < end;) {
+        for (auto [c, s, in] : {std::tuple{&a, &sa, Controls{}}, std::tuple{&b, &sb, fly}}) {
+            sio::Event ev;
+            while (c->poll(ev)) s->handle(ev.name, ev.data, now());
+            s->update(in, now(), 1.0 / 60);
+            for (auto &o : s->take_outbox()) { if (o.hasData) c->emit(o.name, o.data); else c->emit(o.name); }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+    std::printf("co-op live: server sends player velocity: %s\n", sa.velocityEntries ? "yes" : "no (server without smoothing)");
     sa.leave(); sb.leave();
     for (auto &o : sa.take_outbox()) a.emit(o.name);
     for (auto &o : sb.take_outbox()) b.emit(o.name);

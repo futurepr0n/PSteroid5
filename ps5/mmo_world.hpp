@@ -22,7 +22,9 @@
 namespace cssteroids::mmo {
 constexpr int tick_ms = 50, frames_per_tick = 3, protocol_version = 4, id_block = 8;
 constexpr int max_sync_ticks = 600;
-constexpr double player_delay_ticks = 3, enemy_delay_ticks = 4;
+// Others are drawn this far behind the server clock. Players: 2 ticks (as the browser) when the
+// server sends velocity, so late snapshots can glide; 3 ticks for servers without it.
+constexpr double player_delay_ticks = 2, player_delay_no_velocity = 3, enemy_delay_ticks = 4, max_extrapolate_ticks = 2;
 constexpr double ship_radius = 15, view_margin = 200, bullet_speed = 8, bullet_life = 1.8;
 constexpr double tau = 6.283185307179586;
 
@@ -158,17 +160,18 @@ inline double lerp_angle(double from, double to, double t) {
 }
 
 // SnapshotBuffer: per-entity history from delta snapshots; absent entries kept their value.
-struct Sample { double tick, x, y, a; bool dead; bool thrust; };
+struct Sample { double tick, x, y, a; bool dead; bool thrust; double vx = 0, vy = 0; };
 class SnapshotBuffer {
 public:
     double delayTicks, intervalTicks;
     std::map<std::string, std::deque<Sample>> history;
     explicit SnapshotBuffer(double delayMs = 100, double interval = 1) : delayTicks(delayMs / tick_ms), intervalTicks(interval) {}
-    void push(double tick, const std::string &id, double x, double y, double a, bool dead, bool thrust) {
+    void push(double tick, const std::string &id, double x, double y, double a, bool dead, bool thrust, double vx = 0, double vy = 0) {
         auto &samples = history[id];
         if (!samples.empty() && samples.back().tick >= tick) return;
-        if (!samples.empty() && samples.back().tick < tick - intervalTicks) { Sample hold = samples.back(); hold.tick = tick - intervalTicks; samples.push_back(hold); }
-        samples.push_back({tick, x, y, a, dead, thrust});
+        // absent from deltas = unchanged: hold still (no velocity) until this sample
+        if (!samples.empty() && samples.back().tick < tick - intervalTicks) { Sample hold = samples.back(); hold.tick = tick - intervalTicks; hold.vx = hold.vy = 0; samples.push_back(hold); }
+        samples.push_back({tick, x, y, a, dead, thrust, std::isfinite(vx) ? vx : 0, std::isfinite(vy) ? vy : 0});
         while (samples.size() > 64) samples.pop_front();
     }
     void remove(const std::string &id) { history.erase(id); }
@@ -182,6 +185,11 @@ public:
             const Sample &pick = s.size() >= 2 && (renderTick >= s[1].tick || from.dead != s[1].dead) ? s[1] : from;
             out = pick;
             out.dead = renderTick >= pick.tick ? pick.dead : from.dead;
+            // the next snapshot is late: a moving ship glides briefly instead of freezing
+            if (!pick.dead && renderTick > pick.tick) {
+                const double ahead = std::min(renderTick - pick.tick, max_extrapolate_ticks) * frames_per_tick;
+                out.x += pick.vx * ahead; out.y += pick.vy * ahead;
+            }
             return true;
         }
         const Sample &to = s[1];
@@ -288,6 +296,7 @@ public:
     double bannerMs = 0;
     // stats for the HUD / tests
     int statesReceived = 0, shotsSent = 0;
+    bool velocityEntries = false; // the server appends vx, vy to player entries
     // Where in the server tick our updates should land (0..1). 0.35 + up to one 60 Hz frame of
     // send delay centres arrivals around mid-tick (measured with tools/sio-fixture JITTER_MS).
     double sendPhase = 0.35;
@@ -396,7 +405,7 @@ public:
         // remote players / enemies from the snapshot buffers, 2 ticks behind
         // Others are drawn a little in the past so there is a later sample to blend toward:
         // players update every tick, enemies every 2; the extra tick absorbs network jitter.
-        const double playerTick = server_tick(nowMs) - player_delay_ticks, enemyTick = server_tick(nowMs) - enemy_delay_ticks;
+        const double playerTick = server_tick(nowMs) - (velocityEntries ? player_delay_ticks : player_delay_no_velocity), enemyTick = server_tick(nowMs) - enemy_delay_ticks;
         for (auto &[id, p] : players) if (Sample s; playerBuf.sample(id, playerTick, s)) { p.x = s.x; p.y = s.y; p.angle = s.a; p.dead = s.dead; p.thrust = s.thrust; }
         for (auto &[id, e] : enemies) if (Sample s; enemyBuf.sample(id, enemyTick, s)) { e.x = s.x; e.y = s.y; e.a = s.a; }
         // Own pose once per server tick, timed to ARRIVE mid-tick: the server keeps the last update
@@ -501,7 +510,10 @@ private:
                 if (id == myId) continue;
                 const bool isDead = e.items.size() > 4 && e.items[4].b;
                 const bool thrust = e.items.size() > 5 && e.items[5].n == 1;
-                playerBuf.push(t, id, e.items[1].n, e.items[2].n, e.items[3].n, isDead, thrust);
+                // servers with smoothing append velocity: [id, x, y, a, dead, thrust, vx, vy]
+                const double evx = e.items.size() > 7 ? e.items[6].n : 0, evy = e.items.size() > 7 ? e.items[7].n : 0;
+                if (e.items.size() > 7) velocityEntries = true;
+                playerBuf.push(t, id, e.items[1].n, e.items[2].n, e.items[3].n, isDead, thrust, evx, evy);
                 if (auto it = players.find(id); it != players.end()) it->second.outOfView = false;
             }
         if (const auto *en = d.get("e"); en && en->is_array())

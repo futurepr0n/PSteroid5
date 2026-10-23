@@ -48,7 +48,9 @@ if [[ -x $node && -d $repo/tools/sio-fixture/node_modules/socket.io ]]; then
     "$node" "$(wslpath -w "$repo/tools/sio-fixture/server.js")" 0 0.0.0.0 > "$app/sio.port" & sio_fixture=$!
     "$node" "$(wslpath -w "$repo/tools/sio-fixture/mmo-server.js")" 0 0.0.0.0 > "$app/mmo.port" 2> "$app/mmo-fixture.log" & mmo_fixture=$!
     trap 'kill $fixture $fixture_tls $sio_fixture $mmo_fixture 2>/dev/null || true' EXIT
-    for _ in $(seq 150); do grep -q "[0-9]" "$app/sio.port" 2>/dev/null && grep -q "[0-9]" "$app/mmo.port" 2>/dev/null && break; sleep .1; done
+    # Windows Node can take many seconds to start when the machine is busy
+    for _ in $(seq 300); do grep -q "[0-9]" "$app/sio.port" 2>/dev/null && grep -q "[0-9]" "$app/mmo.port" 2>/dev/null && break; sleep .1; done
+    grep -q "[0-9]" "$app/sio.port" && grep -q "[0-9]" "$app/mmo.port" || { echo "socket.io fixtures did not start (see $app/mmo-fixture.log)" >&2; exit 1; }
     PSTEROIDS_LIVE=${PSTEROIDS_LIVE:-} "$app/test-sio" "http://$win_host:$(tr -d '\r' < "$app/sio.port")"
     "$app/test-mmo" "$repo/ps5/testdata/world_vectors.json" "http://$win_host:$(tr -d '\r' < "$app/mmo.port")"
 else
