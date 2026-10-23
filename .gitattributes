@@ -1,0 +1,4 @@
+*.sh text eol=lf
+*.py text eol=lf
+ps5/*.cpp text eol=lf
+ps5/*.hpp text eol=lf

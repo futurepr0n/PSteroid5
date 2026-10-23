@@ -1,0 +1,4 @@
+# Generated PS5 package and logs
+dist/
+*.log
+__pycache__/

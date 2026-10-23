@@ -1,0 +1,3 @@
+# CSSteroids server address for the PS5 title (numeric IPv4, port defaults to 6161).
+# Copy to /data/cssteroids-ps5/server.txt (preferred) or beside eboot.bin as server.txt.
+192.168.1.50:6161
