@@ -622,15 +622,7 @@ private:
             emit("mmo-player-died", std::move(r));
             dead = true; thrusting = false; respawnCountdownMs = 3000;
         };
-        ShipGeometry g = design.geometry;
-        auto touches = [&](double cx, double cy, double r) {
-            if (!g.custom()) return std::hypot(x - cx, y - cy) < ship_radius + r;
-            const double c = std::cos(angle), sn = std::sin(angle);
-            for (const auto &l : g.lines)
-                if (segment_hits_circle(float(x + l.x1 * c - l.y1 * sn), float(y + l.x1 * sn + l.y1 * c),
-                                        float(x + l.x2 * c - l.y2 * sn), float(y + l.x2 * sn + l.y2 * c), float(cx), float(cy), float(r))) return true;
-            return std::hypot(x - cx, y - cy) < ship_radius;
-        };
+        auto touches = [&](double cx, double cy, double r) { return ship_hits_circle(design.geometry, x, y, angle, cx, cy, r, ship_radius); };
         for (auto &[id, a] : asteroids) if (asteroid_visible(a) && touches(a.x, a.y, a.radius)) { report("asteroid", json::Value::number_value(double(id)), true); return; }
         for (auto &[id, e] : enemies) if (!e.outOfView && touches(e.x, e.y, 15)) {
             json::Value v = json::Value::string_value(id);

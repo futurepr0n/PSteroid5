@@ -1,0 +1,526 @@
+{
+ "server": "https://asteroids.futurepr0n.com",
+ "fetched": "2026-10-23T18:32:43.793Z",
+ "ships": 34,
+ "custom": 33,
+ "typeCounts": {
+  "custom": 33,
+  "triangle": 1
+ },
+ "lines": {
+  "median": 11,
+  "p90": 43,
+  "max": 73
+ },
+ "extent": {
+  "medianX": 101.375,
+  "medianY": 142.875,
+  "maxX": 470.75,
+  "maxY": 455.25390625,
+  "over200": 1
+ },
+ "joinedEndpoints": {
+  "median": 0.16666666666666666,
+  "shipsMostlyJoined": 8
+ },
+ "mirror": {
+  "median": 0.6,
+  "shipsMostlySymmetric": 15
+ },
+ "grid": {
+  "within3of10": 0.4090909090909091,
+  "exactly10": 0,
+  "exactly5": 0,
+  "shipsExactlyOn10": 1
+ },
+ "segments": {
+  "medianLength": 120.61509026651683,
+  "shipsWithManyTinySegments": 1
+ },
+ "colors": {
+  "median": 1,
+  "max": 5,
+  "multiColour": 6
+ },
+ "weapons": {
+  "histogram": [
+   7,
+   8,
+   18
+  ],
+  "frontY": -82.59375
+ },
+ "thrusters": {
+  "histogram": [
+   5,
+   1,
+   20,
+   7
+  ],
+  "rearY": 108.62109375
+ },
+ "perShip": [
+  {
+   "name": "two",
+   "lines": 18,
+   "mirror": 0,
+   "joined": 0.56,
+   "exact10": 0,
+   "extent": [
+    104,
+    177
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 2
+  },
+  {
+   "name": "one",
+   "lines": 11,
+   "mirror": 0,
+   "joined": 0.64,
+   "exact10": 0,
+   "extent": [
+    46,
+    128
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 2
+  },
+  {
+   "name": "li",
+   "lines": 6,
+   "mirror": 1,
+   "joined": 0.17,
+   "exact10": 0,
+   "extent": [
+    120,
+    148
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 2
+  },
+  {
+   "name": "tester",
+   "lines": 6,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    120,
+    161
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 2
+  },
+  {
+   "name": "yuyiu",
+   "lines": 5,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    69,
+    99
+   ],
+   "colors": 1,
+   "weapons": 0,
+   "thrusters": 0
+  },
+  {
+   "name": "test323",
+   "lines": 6,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    109,
+    178
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 2
+  },
+  {
+   "name": "test",
+   "lines": 7,
+   "mirror": 0,
+   "joined": 0.29,
+   "exact10": 0,
+   "extent": [
+    119,
+    143
+   ],
+   "colors": 1,
+   "weapons": 1,
+   "thrusters": 2
+  },
+  {
+   "name": "sillywtf",
+   "lines": 18,
+   "mirror": 0.83,
+   "joined": 1,
+   "exact10": 0.11,
+   "extent": [
+    68,
+    142
+   ],
+   "colors": 1,
+   "weapons": 0,
+   "thrusters": 0
+  },
+  {
+   "name": "testship3",
+   "lines": 3,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    101,
+    109
+   ],
+   "colors": 1,
+   "weapons": 1,
+   "thrusters": 2
+  },
+  {
+   "name": "testship3",
+   "lines": 3,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    101,
+    109
+   ],
+   "colors": 1,
+   "weapons": 1,
+   "thrusters": 2
+  },
+  {
+   "name": "testship3",
+   "lines": 3,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    101,
+    109
+   ],
+   "colors": 1,
+   "weapons": 1,
+   "thrusters": 2
+  },
+  {
+   "name": "Testing",
+   "lines": 8,
+   "mirror": 1,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    101,
+    132
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 3
+  },
+  {
+   "name": "Boobieprise",
+   "lines": 32,
+   "mirror": 1,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    153,
+    86
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 2
+  },
+  {
+   "name": "Boobieprise",
+   "lines": 32,
+   "mirror": 1,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    153,
+    86
+   ],
+   "colors": 1,
+   "weapons": 0,
+   "thrusters": 0
+  },
+  {
+   "name": "Crappy",
+   "lines": 12,
+   "mirror": 1,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    78,
+    136
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 3
+  },
+  {
+   "name": "gasdsa",
+   "lines": 5,
+   "mirror": 0.6,
+   "joined": 0.8,
+   "exact10": 1,
+   "extent": [
+    40,
+    50
+   ],
+   "colors": 1,
+   "weapons": 0,
+   "thrusters": 0
+  },
+  {
+   "name": "Testing 2",
+   "lines": 31,
+   "mirror": 0,
+   "joined": 0.42,
+   "exact10": 0,
+   "extent": [
+    142,
+    172
+   ],
+   "colors": 1,
+   "weapons": 0,
+   "thrusters": 2
+  },
+  {
+   "name": "testship3",
+   "lines": 3,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    101,
+    109
+   ],
+   "colors": 1,
+   "weapons": 1,
+   "thrusters": 2
+  },
+  {
+   "name": "testship3",
+   "lines": 16,
+   "mirror": 1,
+   "joined": 0.38,
+   "exact10": 0,
+   "extent": [
+    98,
+    119
+   ],
+   "colors": 5,
+   "weapons": 2,
+   "thrusters": 2
+  },
+  {
+   "name": "sillywtf",
+   "lines": 43,
+   "mirror": 1,
+   "joined": 0.8,
+   "exact10": 0,
+   "extent": [
+    107,
+    166
+   ],
+   "colors": 2,
+   "weapons": 2,
+   "thrusters": 3
+  },
+  {
+   "name": "sillywtf",
+   "lines": 31,
+   "mirror": 1,
+   "joined": 0.81,
+   "exact10": 0,
+   "extent": [
+    107,
+    166
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 3
+  },
+  {
+   "name": "sillywtf",
+   "lines": 13,
+   "mirror": 1,
+   "joined": 0.92,
+   "exact10": 0,
+   "extent": [
+    72,
+    135
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 3
+  },
+  {
+   "name": "testship3",
+   "lines": 3,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    161,
+    196
+   ],
+   "colors": 1,
+   "weapons": 1,
+   "thrusters": 2
+  },
+  {
+   "name": "testship3",
+   "lines": 3,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    161,
+    196
+   ],
+   "colors": 1,
+   "weapons": 1,
+   "thrusters": 2
+  },
+  {
+   "name": "testship6",
+   "lines": 39,
+   "mirror": 0.77,
+   "joined": 0.59,
+   "exact10": 0.51,
+   "extent": [
+    82,
+    163
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 2
+  },
+  {
+   "name": "sillywtf",
+   "lines": 57,
+   "mirror": 1,
+   "joined": 0.94,
+   "exact10": 0,
+   "extent": [
+    81,
+    163
+   ],
+   "colors": 1,
+   "weapons": 0,
+   "thrusters": 3
+  },
+  {
+   "name": "sillywtf",
+   "lines": 27,
+   "mirror": 0.96,
+   "joined": 0.89,
+   "exact10": 0.07,
+   "extent": [
+    53,
+    159
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 2
+  },
+  {
+   "name": "silly",
+   "lines": 57,
+   "mirror": 0.91,
+   "joined": 0.73,
+   "exact10": 0,
+   "extent": [
+    121,
+    162
+   ],
+   "colors": 5,
+   "weapons": 2,
+   "thrusters": 2
+  },
+  {
+   "name": "testship6",
+   "lines": 36,
+   "mirror": 1,
+   "joined": 0.85,
+   "exact10": 0,
+   "extent": [
+    164,
+    191
+   ],
+   "colors": 5,
+   "weapons": 0,
+   "thrusters": 0
+  },
+  {
+   "name": "testship3",
+   "lines": 3,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    161,
+    196
+   ],
+   "colors": 1,
+   "weapons": 1,
+   "thrusters": 2
+  },
+  {
+   "name": "Testing",
+   "lines": 8,
+   "mirror": 1,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    101,
+    132
+   ],
+   "colors": 1,
+   "weapons": 2,
+   "thrusters": 3
+  },
+  {
+   "name": "Marks",
+   "lines": 8,
+   "mirror": 0,
+   "joined": 0,
+   "exact10": 0,
+   "extent": [
+    58,
+    106
+   ],
+   "colors": 2,
+   "weapons": 2,
+   "thrusters": 1
+  },
+  {
+   "name": "testship3",
+   "lines": 73,
+   "mirror": 0,
+   "joined": 0.3,
+   "exact10": 0,
+   "extent": [
+    471,
+    455
+   ],
+   "colors": 2,
+   "weapons": 2,
+   "thrusters": 2
+  }
+ ]
+}

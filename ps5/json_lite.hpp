@@ -34,6 +34,7 @@ struct Value {
 
     static Value string_value(std::string text) { Value v; v.type = Type::string; v.s = std::move(text); return v; }
     static Value number_value(double x) { Value v; v.type = Type::number; v.n = x; return v; }
+    static Value bool_value(bool x) { Value v; v.type = Type::boolean; v.b = x; return v; }
     static Value object() { Value v; v.type = Type::object; return v; }
     Value &set(const std::string &key, Value v) {
         for (auto &f : fields) if (f.first == key) { f.second = std::move(v); return *this; }

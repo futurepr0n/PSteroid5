@@ -41,11 +41,22 @@ struct ShipGeometry {
     bool custom() const { return shape == ShipShape::custom && !lines.empty(); }
 };
 
-inline bool segment_hits_circle(float x1, float y1, float x2, float y2, float cx, float cy, float r) {
-    const float dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
-    float t = len2 > 0 ? ((cx - x1) * dx + (cy - y1) * dy) / len2 : 0;
-    t = std::clamp(t, 0.f, 1.f);
+inline bool segment_hits_circle(double x1, double y1, double x2, double y2, double cx, double cy, double r) {
+    const double dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
+    double t = len2 > 0 ? ((cx - x1) * dx + (cy - y1) * dy) / len2 : 0;
+    t = std::clamp(t, 0.0, 1.0);
     return std::hypot(x1 + t * dx - cx, y1 + t * dy - cy) <= r;
+}
+
+// Ship.checkCollision: custom ships test each rotated line, then a centre-in-radius fallback;
+// built-in shapes use the 15 px circle.
+inline bool ship_hits_circle(const ShipGeometry &g, double sx, double sy, double angle, double cx, double cy, double r, double radius = 15) {
+    if (!g.custom()) return std::hypot(sx - cx, sy - cy) < radius + r;
+    const double c = std::cos(angle), s = std::sin(angle);
+    for (const auto &l : g.lines)
+        if (segment_hits_circle(sx + l.x1 * c - l.y1 * s, sy + l.x1 * s + l.y1 * c,
+                                sx + l.x2 * c - l.y2 * s, sy + l.x2 * s + l.y2 * c, cx, cy, r)) return true;
+    return std::hypot(sx - cx, sy - cy) < radius;
 }
 
 struct Controls {
@@ -214,17 +225,7 @@ private:
         for (const auto &p : geometry.weapons) add(s.x + p.x * cs - p.y * sn, s.y + p.x * sn + p.y * cs);
     }
 
-    // Ship.checkCollision: custom ships test each rotated line, then a centre-in-radius fallback.
-    bool ship_hits(float cx, float cy, float r) const {
-        const Ship &s = ship;
-        if (!geometry.custom()) return std::hypot(s.x - cx, s.y - cy) < s.radius + r;
-        const float c = std::cos(s.angle), sn = std::sin(s.angle);
-        for (const auto &l : geometry.lines) {
-            if (segment_hits_circle(s.x + l.x1 * c - l.y1 * sn, s.y + l.x1 * sn + l.y1 * c,
-                                    s.x + l.x2 * c - l.y2 * sn, s.y + l.x2 * sn + l.y2 * c, cx, cy, r)) return true;
-        }
-        return std::hypot(s.x - cx, s.y - cy) < s.radius;
-    }
+    bool ship_hits(float cx, float cy, float r) const { return ship_hits_circle(geometry, ship.x, ship.y, ship.angle, cx, cy, r, ship.radius); }
 
     void respawn() {
         lives--;

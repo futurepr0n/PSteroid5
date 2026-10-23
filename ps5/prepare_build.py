@@ -10,7 +10,7 @@ TITLE_ID = 'PPSA99305'
 CONTENT_ID = 'UP9000-PPSA99305_00-CSSTEROIDSPS5000'
 VERSION = '01.000.000'
 PORT_REVISION = 'm3-https-server-api-2026-10-23'
-HEADERS = ['asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp', 'socketio.hpp', 'mmo_world.hpp', 'coop_lobby.hpp']
+HEADERS = ['asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp', 'socketio.hpp', 'mmo_world.hpp', 'coop_lobby.hpp', 'ship_render.hpp', 'ship_editor.hpp']
 
 repo = Path(sys.argv[1]).resolve()
 work = Path.home() / 'work'
@@ -48,6 +48,37 @@ code = code.replace(objects, objects + ' "$<TARGET_OBJECTS:mbedtls_ps5>"')
 code = code.replace('DEPENDS samples ', 'DEPENDS samples mbedtls_ps5 ', 1)
 cmake.write_text(code)
 shutil.copytree(repo / 'third_party/mbedtls', app / 'mbedtls', dirs_exist_ok=True)
+# DualSense touchpad for the ship editor (staged copy only; the shared template is untouched).
+# The 120-byte pad sample follows the SDK pad-data layout whose anchors platform.c already
+# asserts (connected @0x4c, timestamp @0x50): touch count @52, touch[i] @60+8i = {u16 x, u16 y,
+# u8 id}. Implausible values read as "no touch", so a wrong layout can only disable the feature.
+def patch(path, pairs):
+    text = path.read_text().replace('\r\n', '\n')
+    for old, new in pairs:
+        if text.count(old) != 1:
+            raise SystemExit(f'{path.name}: platform layout changed near {old[:40]!r}')
+        text = text.replace(old, new)
+    path.write_text(text)
+patch(app / 'ps5/src/platform.h', [(
+    '   float l2, r2;                           /* 0..1 */\n};',
+    '   float l2, r2;                           /* 0..1 */\n'
+    '   int touch_count;                        /* PSteroid5: fingers on the touchpad, 0..2 */\n'
+    '   float touch_x, touch_y;                 /* first finger, raw pad units */\n'
+    '   int touch_id;                           /* changes when a new finger lands */\n};')])
+patch(app / 'ps5/src/platform.c', [(
+    '   pad->r2 = pad_last.r2 / 255.0f;\n}',
+    '   pad->r2 = pad_last.r2 / 255.0f;\n'
+    '   {\n'
+    '      const uint8_t *raw = (const uint8_t *)&pad_last;\n'
+    '      uint16_t tx, ty;\n'
+    '      memcpy(&tx, raw + 60, 2);\n'
+    '      memcpy(&ty, raw + 62, 2);\n'
+    '      const int fingers = raw[52];\n'
+    '      pad->touch_count = (fingers >= 0 && fingers <= 2 && tx < 4096 && ty < 4096) ? fingers : 0;\n'
+    '      pad->touch_x = tx;\n'
+    '      pad->touch_y = ty;\n'
+    '      pad->touch_id = raw[64];\n'
+    '   }\n}')])
 prelude = app / 'ps5/src/prelude.h'
 code = '\n'.join(line for line in prelude.read_text().splitlines() if '../../examples/rpcs3ps5/' not in line)
 prelude.write_text(code + '\n' + ''.join(f'#include "{h}"\n' for h in HEADERS))

@@ -36,6 +36,20 @@ for _ in $(seq 50); do [[ -s $app/fixture.port && -s $app/fixture-tls.port ]] &&
 # PSTEROIDS_LIVE (e.g. https://asteroids.futurepr0n.com) adds read-only GETs to a real server.
 PSTEROIDS_LIVE=${PSTEROIDS_LIVE:-} "$app/test-net" "$(cat "$app/fixture.port")" "$(cat "$app/fixture-tls.port")"
 
+# Ship editor: model tests, then evidence judged by CSSteroids-2's own server validators and
+# browser ship.js (tools/ship-evidence.js; property sessions, gallery round trips, rebuilds).
+g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/test_editor.cpp" -o "$app/test-editor"
+"$app/test-editor"
+g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/ship_evidence.cpp" -o "$app/ship-evidence"
+"$app/ship-evidence" "$repo/ps5/testdata/ship_corpus.json" "$app/ship_evidence.json" 400
+if [[ -x "/mnt/c/Program Files/nodejs/node.exe" && -d $repo/../CSSTeroids-2 ]]; then
+    "/mnt/c/Program Files/nodejs/node.exe" "$(wslpath -w "$repo/tools/ship-evidence.js")" "$(wslpath -w "$app/ship_evidence.json")" > "$app/ship-evidence-report.json"
+    tr -d '\r' < "$app/ship-evidence-report.json" | sed -n '/"byKind"/,$p' | tr -d '\n ' ; echo
+    cp "$app/ship-evidence-report.json" "$repo/ps5/testdata/ship_evidence_report.json"
+else
+    echo "Windows Node or ../CSSTeroids-2 missing: ship evidence not judged"
+fi
+
 # Multiplayer: WebSocket/socket.io client and the shared-world model. Golden vectors come from
 # the real world-sim.js (tools/gen-world-vectors.js). The live parts run against a socket.io
 # fixture and the REAL CSSteroids-2 world engine (tools/sio-fixture), using Windows Node from WSL.

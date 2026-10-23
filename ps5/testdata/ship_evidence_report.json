@@ -1,0 +1,37 @@
+{
+ "editor": {
+  "sessions": 400,
+  "propertyShips": 384,
+  "steps": 16169,
+  "refused": 4055,
+  "corpus": 34,
+  "loaded": 33,
+  "inCanvas": 32,
+  "lossless": 33,
+  "rebuilt": 32,
+  "worstShiftUnits": 3.4104493180197313
+ },
+ "judged": 450,
+ "segmentsMatched": 24507,
+ "endpointDotsMatched": 49014,
+ "flameAnchorsMatched": 3543,
+ "collisionSamplesMatched": 162000,
+ "collisionTiesSkipped": 0,
+ "byKind": {
+  "property": {
+   "ships": 384,
+   "serverAccepts": 384,
+   "browserIdentical": 384
+  },
+  "corpus": {
+   "ships": 33,
+   "serverAccepts": 33,
+   "browserIdentical": 33
+  },
+  "rebuild": {
+   "ships": 33,
+   "serverAccepts": 33,
+   "browserIdentical": 33
+  }
+ }
+}

@@ -21,7 +21,14 @@ Plan: `../docs/plans/2026-10-23-ps5-native-port.md`.
 - HTTPS: vendored mbedTLS 3.6.2 (`third_party/mbedtls`, unmodified) with the
   ISRG Root X1/X2 certificates; untrusted certificates are refused (tested).
   DNS uses the console resolver (`libSceNet`), then `getaddrinfo`.
-- Not yet: enemies, multiplayer, ship customizer, audio (later milestones).
+- **Ship editor** (title > SHIP EDITOR): controller-first, with optional touchpad (slide to
+  move the cursor, press-and-hold to drag). LINE/MOVE/ERASE/PAINT/THRUSTER/WEAPON tools,
+  mirror on by default (R3), 5-unit grid with a fine step (L3), presets plus a custom colour,
+  undo/redo, a live in-game-size preview, a collision outline and a test flight. Saves to
+  the server; ships made or loaded by passphrase update in place, gallery ships save as
+  copies. Evidence: `../docs/ship-editor-report.md`.
+- Multiplayer: MMO (drop-in shared world) and MULTIPLAYER (two-pilot co-op rooms).
+- Not yet: enemies in single-player, audio.
 - Deliberate difference: the browser loses a life from both a timer and the
   explosion update; this port deducts exactly one life per hit.
 
