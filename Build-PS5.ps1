@@ -12,12 +12,12 @@ try {
     $buildExit=$LASTEXITCODE
 } finally { $ErrorActionPreference=$nativePreference }
 if($buildExit -ne 0) { throw "PS5 build failed (exit $buildExit)." }
-$out=Join-Path $repo 'dist\PPSA99305'
+$out=Join-Path $repo 'dist\PPSA77305'
 if(Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
 New-Item -ItemType Directory -Path $out -Force | Out-Null
-$source='\\wsl.localhost\Ubuntu\home\futurepr0n\work\psteroids5-app\dist\PPSA99305'
+$source='\\wsl.localhost\Ubuntu\home\futurepr0n\work\psteroids5-app\dist\PPSA77305'
 Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination $out -Recurse -Force
-python (Join-Path $repo '..\PSPGameCPP\ps5\validate_package.py') $out --generic --title-id PPSA99305 --write-report
+python (Join-Path $repo '..\PSPGameCPP\ps5\validate_package.py') $out --generic --title-id PPSA77305 --write-report
 if($LASTEXITCODE -ne 0) { throw 'Folder-title validation failed.' }
 Copy-Item -LiteralPath (Join-Path $out 'validation.json') -Destination (Join-Path $repo 'ps5\validation.json') -Force
 Write-Host "Built: $out"

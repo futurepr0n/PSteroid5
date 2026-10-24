@@ -1,6 +1,6 @@
 # PSteroid5 — native PS5 port of CSSteroids
 
-Title **PPSA99305**, content ID `UP9000-PPSA99305_00-CSSTEROIDSPS5000`, version
+Title **PPSA77305**, content ID `UP9000-PPSA77305_00-PSTEROID5PS50000`, version
 01.000.000. A native C++ folder title of the CSSteroids-2 browser game built with
 the workspace's PayloadSDK/Vulkan toolchain (see `../../PS5-PORTING-HANDBOOK.md`).
 Plan: `../docs/plans/2026-10-23-ps5-native-port.md`.
@@ -66,7 +66,7 @@ The console's clock must be roughly correct: certificate dates are checked.
 
 Runs host tests (simulation, ship parsing, JSON/HTTP/TLS against loopback fixtures; `-LiveServer https://asteroids.futurepr0n.com` adds read-only GETs to that server), the native
 build, SELF integrity inspection and generic folder validation of both the WSL
-and Windows copies. Output: `dist/PPSA99305/` (git-ignored). Staging:
+and Windows copies. Output: `dist/PPSA77305/` (git-ignored). Staging:
 `~/work/psteroids5-app` in WSL. Run `ps5/Build-Icon.ps1` to regenerate the icon.
 
 Smoke test: put a positive frame count in `smoke-test.txt` beside eboot.bin; the

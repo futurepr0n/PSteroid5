@@ -75,7 +75,7 @@ fi
 
 # Relink and repackage every time: link-title.sh also copies param.json and the icon,
 # and ninja would skip it when only metadata changed.
-rm -rf "$app/dist/PPSA99305" "$app/build/ps5/eboot.elf"
+rm -rf "$app/dist/PPSA77305" "$app/build/ps5/eboot.elf"
 bash "$app/ps5/tools/build.sh"
 # Imports from a module the loader does not map stay at address 0 (-z
 # nodynamic-undefined-weak) and crash when called: libSceRandom did exactly that.
@@ -84,5 +84,5 @@ loaded='libkernel libSceLibcInternal libSceNet libSceVideoOut libSceAgc libSceAg
 for lib in $(readelf -d "$app/build/ps5/link/llvm-pie.elf" | sed -n 's/.*Shared library: \[\(.*\)\.s\?prx\]/\1/p'); do
     [[ " $loaded " == *" $lib "* ]] || { echo "Needed module $lib has not been seen loading on the console" >&2; exit 1; }
 done
-python3 "$validator" "$app/dist/PPSA99305" --generic --title-id PPSA99305 --write-report
-echo "Built $app/dist/PPSA99305"
+python3 "$validator" "$app/dist/PPSA77305" --generic --title-id PPSA77305 --write-report
+echo "Built $app/dist/PPSA77305"

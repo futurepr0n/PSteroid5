@@ -6,13 +6,14 @@ Adapted from PSPGameCPP/ps5/prepare_build.py. Uses its own staging tree
 from pathlib import Path
 import json, shutil, subprocess, sys, hashlib
 
-TITLE_ID = 'PPSA99305'
-CONTENT_ID = 'UP9000-PPSA99305_00-CSSTEROIDSPS5000'
-VERSION = '01.000.000'
 PORT_REVISION = 'm3-https-server-api-2026-10-23'
 HEADERS = ['asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp', 'socketio.hpp', 'mmo_world.hpp', 'coop_lobby.hpp', 'ship_render.hpp', 'ship_editor.hpp']
 
 repo = Path(sys.argv[1]).resolve()
+# ps5/sce_sys/param.json is the title's identity (the catalog reads it from the repository).
+param = json.loads((repo / 'ps5/sce_sys/param.json').read_text(encoding='utf-8'))
+TITLE_ID, CONTENT_ID, VERSION = param['titleId'], param['contentId'], param['contentVersion']
+assert param['conceptId'] == TITLE_ID[4:] and CONTENT_ID[7:16] == TITLE_ID and len(CONTENT_ID) == 36
 work = Path.home() / 'work'
 template = work / 'ps5-rpcs3-app'
 app = work / 'psteroids5-app'
@@ -94,11 +95,7 @@ for src, dst in copies:
 for p in (app / 'ps5').rglob('*.sh'):
     p.write_bytes(p.read_bytes().replace(b'\r\n', b'\n'))
 
-param_path = app / 'ps5/sce_sys/param.json'
-param = json.loads(param_path.read_text())
-param.update(titleId=TITLE_ID, conceptId=TITLE_ID[4:], contentId=CONTENT_ID, contentVersion=VERSION)
-param['localizedParameters']['en-US']['titleName'] = 'PSteroid5'
-param_path.write_text(json.dumps(param, indent=2) + '\n')
+shutil.copy2(repo / 'ps5/sce_sys/param.json', app / 'ps5/sce_sys/param.json')
 icon = repo / 'ps5/sce_sys/icon0.png'
 if not icon.is_file():
     raise SystemExit('Missing launcher icon. Run ps5/Build-Icon.ps1 first.')
