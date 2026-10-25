@@ -44,7 +44,8 @@ Plan: `../docs/plans/2026-10-23-ps5-native-port.md`.
 | Game | Left stick / D-pad left-right | Turn |
 | Game | R2, D-pad up or stick up | Thrust |
 | Game | CROSS, R1 or SQUARE | Fire |
-| Game | OPTIONS / CIRCLE | Pause / title |
+| Game | OPTIONS | Pause |
+| Game, MMO, co-op | CIRCLE | Menu: RESUME or quit (single player pauses; MMO and co-op keep running) |
 | Game over | TRIANGLE / CROSS | Submit score / play again |
 | Hangar | Left/right, CROSS | Browse gallery, fly the shown ship |
 | Hangar | SQUARE | Switch gallery ↔ passphrase wheels (left/right word, up/down change, CROSS load) |

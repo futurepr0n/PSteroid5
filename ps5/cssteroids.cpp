@@ -65,6 +65,9 @@ class VulkanExample : public ps5ui::KitExample {
     Screen screen = Screen::title;
     int menu = 0, galleryIndex = 0, wheel[3] = {0, 0, 0}, wheelFocus = 0, nameCursor = 0;
     bool hangarPassphrase = false, paused = false, savedRun = false, submitted = false;
+    // CIRCLE in play opens this menu (RESUME / quit) instead of leaving at once
+    bool quitMenu = false;
+    int quitIndex = 0;
     std::string nameDraft;
     float accumulator = 0, exitHold = 0, previewSpin = 0;
     // sound: retro effects and the thruster loop (sound.hpp, the same recipes as the browser)
@@ -337,9 +340,9 @@ class VulkanExample : public ps5ui::KitExample {
         std::snprintf(line, sizeof line, "Score: %d", game.score); text(line, 40, 60, 30);
         std::snprintf(line, sizeof line, "Lives: %d", game.lives); text(line, 1700, 60, 30);
         if (!game.over) drawEffectTimers(game.ship.effects, 1700, 100);
-        std::snprintf(line, sizeof line, testFlight ? "TEST FLIGHT  -  CIRCLE back to editor" : "Level %d", game.level); text(line, testFlight ? 700 : 900, 60, 26, 0x9fb3c8);
+        std::snprintf(line, sizeof line, testFlight ? "TEST FLIGHT  -  CIRCLE menu to return to the editor" : "Level %d", game.level); text(line, testFlight ? 700 : 900, 60, 26, 0x9fb3c8);
         if (game.levelBanner > 0 && !game.over) centered(line, 520, 64);
-        text("STICK / D-PAD  Turn     R2 / UP  Thrust     CROSS / R1  Fire     OPTIONS  Pause     CIRCLE  Title", 40, 1050, 20, 0x8293ab);
+        text("STICK / D-PAD  Turn     R2 / UP  Thrust     CROSS / R1  Fire     OPTIONS  Pause     CIRCLE  Menu", 40, 1050, 20, 0x8293ab);
         if (game.over) {
             scene.rounded_rect({0, 0, 1920, 1080}, 0, hui::gfx::Color::rgb(0x000000, .7f));
             centered("GAME OVER", 420, 72, 0xf47366);
@@ -353,10 +356,10 @@ class VulkanExample : public ps5ui::KitExample {
                     if (!submitStatus.empty()) centered(submitStatus, 610, 22, 0xf0c07d);
                 }
             }
-            centered("CROSS to play again / CIRCLE for title", 670, 26, 0x9fb3c8);
+            centered("CROSS to play again / CIRCLE for menu", 670, 26, 0x9fb3c8);
             if (scores.failed) centered("Best score kept for this session; saving was unavailable", 720, 22, 0xf0c07d);
         }
-        if (paused && !game.over) {
+        if (paused && !game.over && !quitMenu) {
             scene.rounded_rect({0, 0, 1920, 1080}, 0, hui::gfx::Color::rgb(0x000000, .6f));
             centered("PAUSED", 515, 56);
             centered("OPTIONS to resume", 575, 26, 0x9fb3c8);
@@ -384,6 +387,7 @@ class VulkanExample : public ps5ui::KitExample {
         lobbyStatus = "Connecting to " + server.label() + " ...";
     }
     void stopMultiplayer() {
+        quitMenu = false;
         mp.leave();
         for (auto &o : mp.take_outbox()) { if (o.hasData) socket.emit(o.name, o.data); else socket.emit(o.name); }
         socket.close();
@@ -584,7 +588,8 @@ class VulkanExample : public ps5ui::KitExample {
     }
     void multiplayerInput(uint32_t pressed) {
         using cssteroids::sio::Client;
-        if (pressed & PAD_CIRCLE) { stopMultiplayer(); return; }
+        if (quitMenuInput(pressed)) return;
+        if (pressed & PAD_CIRCLE) { openQuitMenu(); return; }
         if (coopMode && mp.coopOver && (pressed & PAD_CROSS)) { socket.emit("start-multiplayer-game"); return; } // replay in the same room
         if ((pressed & PAD_CROSS) && server.valid() && (socket.state() == Client::State::closed || mp.phase == cssteroids::mmo::Phase::failed))
             coopMode ? startCoopLobby() : startMmo();
@@ -672,10 +677,48 @@ class VulkanExample : public ps5ui::KitExample {
             centered(mp.coopWon ? "MISSION COMPLETE" : "GAME OVER", 440, 68, mp.coopWon ? 0x70e8a0 : 0xf47366);
             std::snprintf(line, sizeof line, "TEAM SCORE %d     ROUND %d / %d", mp.teamScore, mp.round, mp.maxRounds);
             centered(line, 520, 32);
-            centered("CROSS  Play again in this room     CIRCLE  Leave", 600, 26, 0x9fb3c8);
+            centered("CROSS  Play again in this room     CIRCLE  Menu", 600, 26, 0x9fb3c8);
         }
         centered(mpStatus, 1000, 22, mp.phase == cssteroids::mmo::Phase::playing ? 0x83bed4 : 0xf0c07d);
-        text("STICK / D-PAD  Turn     R2 / UP  Thrust     CROSS / R1  Fire     CIRCLE  Leave world", 40, 1050, 20, 0x8293ab);
+        text("STICK / D-PAD  Turn     R2 / UP  Thrust     CROSS / R1  Fire     CIRCLE  Menu", 40, 1050, 20, 0x8293ab);
+    }
+
+    // --- in-play menu (CIRCLE) ------------------------------------------------
+    std::string quitLabel() const {
+        if (screen == Screen::multiplayer) return coopMode ? "LEAVE ROOM" : "LEAVE WORLD";
+        return testFlight ? "BACK TO EDITOR" : "QUIT TO TITLE";
+    }
+    void openQuitMenu() {
+        quitMenu = true; quitIndex = 0;
+        if (screen == Screen::game) paused = true; // single player waits; the shared world keeps going
+    }
+    // true while the menu has the controller
+    bool quitMenuInput(uint32_t pressed) {
+        if (!quitMenu) return false;
+        if (pressed & (PAD_UP | PAD_DOWN)) quitIndex ^= 1;
+        const bool resume = (pressed & PAD_CIRCLE) || ((pressed & PAD_CROSS) && quitIndex == 0);
+        if (resume) { quitMenu = false; if (screen == Screen::game) paused = false; }
+        else if ((pressed & PAD_CROSS) && quitIndex == 1) {
+            quitMenu = false; paused = false;
+            if (screen == Screen::multiplayer) stopMultiplayer();
+            else if (testFlight) { testFlight = false; game.geometry = ship.geometry; screen = Screen::editor; }
+            else { screen = Screen::title; requestScores(); }
+        }
+        return true;
+    }
+    void drawQuitMenu() {
+        if (!quitMenu) return;
+        using hui::gfx::Color;
+        scene.rounded_rect({0, 0, 1920, 1080}, 0, Color::rgb(0x000000, screen == Screen::game ? .6f : .35f));
+        scene.rounded_rect({710, 380, 500, 290}, 12, Color::rgb(0x08111f, .96f));
+        centered(screen == Screen::game ? "PAUSED" : "MENU", 440, 40, 0xffd700);
+        if (screen == Screen::multiplayer) centered("The game keeps running", 478, 20, 0x9fb3c8);
+        const std::string items[2] = {"RESUME", quitLabel()};
+        for (int i = 0; i < 2; i++) {
+            if (i == quitIndex) scene.rounded_rect({760, 530 + i * 56.f - 34, 400, 46}, 8, Color::rgb(0x2a4a6a));
+            centered(items[i], 530 + i * 56.f, 28, i == quitIndex ? 0xffffff : 0x9fb3c8);
+        }
+        centered("UP/DOWN  Select     CROSS  Confirm     CIRCLE  Resume", 650, 18, 0x8293ab);
     }
 
     // --- ship editor ----------------------------------------------------------
@@ -964,7 +1007,7 @@ class VulkanExample : public ps5ui::KitExample {
 
     // --- input --------------------------------------------------------------
     void startGame() {
-        screen = Screen::game; paused = false; savedRun = false; submitted = false; submitStatus.clear();
+        screen = Screen::game; paused = false; quitMenu = false; savedRun = false; submitted = false; submitStatus.clear();
         game.reset();
     }
     void titleInput(uint32_t pressed) {
@@ -1026,12 +1069,9 @@ class VulkanExample : public ps5ui::KitExample {
         }
     }
     void gameInput(uint32_t pressed) {
+        if (quitMenuInput(pressed)) return;
+        if (pressed & PAD_CIRCLE) { openQuitMenu(); return; }
         if ((pressed & PAD_CROSS) && game.over) { if (testFlight) game.geometry = editorGeometry(); startGame(); }
-        if (pressed & PAD_CIRCLE) {
-            paused = false;
-            if (testFlight) { testFlight = false; game.geometry = ship.geometry; screen = Screen::editor; return; }
-            screen = Screen::title; requestScores();
-        }
         if ((pressed & PAD_OPTIONS) && !game.over) paused = !paused;
         // Scores reach the production database only when the player asks.
         if ((pressed & PAD_TRIANGLE) && game.over && !testFlight && server.valid() && game.score > 0 && !submitted && !submitRequest.pending())
@@ -1094,7 +1134,7 @@ public:
             in.thrust = pad.r2 > .2f || (pad.held & PAD_UP) || pad.left_y < -.6f;
             in.fire = (pad.held & (PAD_CROSS | PAD_R1 | PAD_SQUARE)) != 0;
         }
-        if (screen == Screen::multiplayer || screen == Screen::lobby) pumpMultiplayer(intercepted || screen == Screen::lobby ? cssteroids::Controls{} : in, dt);
+        if (screen == Screen::multiplayer || screen == Screen::lobby) pumpMultiplayer(intercepted || quitMenu || screen == Screen::lobby ? cssteroids::Controls{} : in, dt);
         playCues();
         if (screen == Screen::game && !paused && !intercepted) {
             accumulator = std::min(accumulator + dt, 6 * cssteroids::step_seconds);
@@ -1121,8 +1161,8 @@ public:
             case Screen::title: drawTitle(); break;
             case Screen::hangar: drawHangar(); break;
             case Screen::name: drawNameEntry(); break;
-            case Screen::game: drawWorld(); drawHud(); break;
-            case Screen::multiplayer: drawMultiplayer(); break;
+            case Screen::game: drawWorld(); drawHud(); drawQuitMenu(); break;
+            case Screen::multiplayer: drawMultiplayer(); drawQuitMenu(); break;
             case Screen::lobby: drawLobby(); break;
             case Screen::editor: drawEditor(); break;
         }
