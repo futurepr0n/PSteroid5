@@ -1,7 +1,7 @@
 {
   "status": "passed",
   "console_tested": false,
-  "verified_utc": "2026-10-25T17:54:36.874626+00:00",
+  "verified_utc": "2026-10-25T17:57:04.206159+00:00",
   "title_id": "PPSA77305",
   "eboot_sha256": "dbf0c85dcd2bb2c9ade525b948322c0a3fe8c5a120abcc0f1cbac2e2e879c47a",
   "checks": [
@@ -30,7 +30,7 @@
     "assets/LICENSES/PressStart2P-LICENSE.txt": "705960c3281a5765ecc0b59bd4ed7ca59eed165748076bc2fc3e8fdbfeb944b0",
     "assets/NOTICES.txt": "1e80012bd13aad24b459423b2a97a426f4198109f7bd5cdf3a6d606b543a45d8",
     "assets/Roboto-Medium.ttf": "8559132c89ad51d8a2ba5b171887a44a7ba93776e205f553573de228e64b45f8",
-    "build-provenance.json": "2170b0ab0769f0f5466ee2a6114d5099941b274345cbec6df6f3a37d5ea91db2",
+    "build-provenance.json": "c57011e6f88b6cfc71cfeea32902d89dd76e7db17cf2d495568fd031a0ed209f",
     "eboot.bin": "dbf0c85dcd2bb2c9ade525b948322c0a3fe8c5a120abcc0f1cbac2e2e879c47a",
     "GAME_README.md": "c54711b474c837f8c2ecef77cfc0f971a182178afdb89d153d620e06ea694df1",
     "licenses/GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
@@ -41,7 +41,7 @@
     "licenses/PS5-Vulkan-LICENSE.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "sce_module/libc.prx": "e6ff45d16adf687855cc3b33b0c8a4132b6504360b221e0a34c7e99fb3ba0036",
     "sce_sys/icon0.png": "5f6c76e2b72b86c175b0af3663045d223e11c79df81170076afc0b8d7987fad1",
-    "sce_sys/param.json": "f3516c4288eae68ed0df9338cbb748d69a4947a71996e56f58ffa2df5bdc098b",
+    "sce_sys/param.json": "43fd9e4eaccba94d7c8b93811a14db23a9f0f4e5f4a5fb1cb84b6267c12f2436",
     "server.txt": "be6eb33cbe16699c99bebde06fa0700946ec42d3d59dbfb66d4386b36207ed69",
     "server.txt.example": "be6eb33cbe16699c99bebde06fa0700946ec42d3d59dbfb66d4386b36207ed69",
     "shaders/glsl/base/textoverlay.frag": "95fbad4500da482cf059a6ccc1e703ea66a9da372db976c89e1529342c1bf86c",
