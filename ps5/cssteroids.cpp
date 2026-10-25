@@ -65,7 +65,7 @@ class VulkanExample : public ps5ui::KitExample {
     Screen screen = Screen::title;
     int menu = 0, galleryIndex = 0, wheel[3] = {0, 0, 0}, wheelFocus = 0, nameCursor = 0;
     bool hangarPassphrase = false, paused = false, savedRun = false, submitted = false;
-    // CIRCLE in play opens this menu (RESUME / quit) instead of leaving at once
+    // OPTIONS in play opens this menu (RESUME / quit); CIRCLE is kept free for later
     bool quitMenu = false;
     int quitIndex = 0;
     std::string nameDraft;
@@ -340,9 +340,9 @@ class VulkanExample : public ps5ui::KitExample {
         std::snprintf(line, sizeof line, "Score: %d", game.score); text(line, 40, 60, 30);
         std::snprintf(line, sizeof line, "Lives: %d", game.lives); text(line, 1700, 60, 30);
         if (!game.over) drawEffectTimers(game.ship.effects, 1700, 100);
-        std::snprintf(line, sizeof line, testFlight ? "TEST FLIGHT  -  CIRCLE menu to return to the editor" : "Level %d", game.level); text(line, testFlight ? 700 : 900, 60, 26, 0x9fb3c8);
+        std::snprintf(line, sizeof line, testFlight ? "TEST FLIGHT  -  OPTIONS menu to return to the editor" : "Level %d", game.level); text(line, testFlight ? 700 : 900, 60, 26, 0x9fb3c8);
         if (game.levelBanner > 0 && !game.over) centered(line, 520, 64);
-        text("STICK / D-PAD  Turn     R2 / UP  Thrust     CROSS / R1  Fire     OPTIONS  Pause     CIRCLE  Menu", 40, 1050, 20, 0x8293ab);
+        text("STICK / D-PAD  Turn     R2 / UP  Thrust     CROSS / R1  Fire     OPTIONS  Menu", 40, 1050, 20, 0x8293ab);
         if (game.over) {
             scene.rounded_rect({0, 0, 1920, 1080}, 0, hui::gfx::Color::rgb(0x000000, .7f));
             centered("GAME OVER", 420, 72, 0xf47366);
@@ -356,13 +356,8 @@ class VulkanExample : public ps5ui::KitExample {
                     if (!submitStatus.empty()) centered(submitStatus, 610, 22, 0xf0c07d);
                 }
             }
-            centered("CROSS to play again / CIRCLE for menu", 670, 26, 0x9fb3c8);
+            centered("CROSS to play again / OPTIONS for menu", 670, 26, 0x9fb3c8);
             if (scores.failed) centered("Best score kept for this session; saving was unavailable", 720, 22, 0xf0c07d);
-        }
-        if (paused && !game.over && !quitMenu) {
-            scene.rounded_rect({0, 0, 1920, 1080}, 0, hui::gfx::Color::rgb(0x000000, .6f));
-            centered("PAUSED", 515, 56);
-            centered("OPTIONS to resume", 575, 26, 0x9fb3c8);
         }
     }
 
@@ -589,7 +584,7 @@ class VulkanExample : public ps5ui::KitExample {
     void multiplayerInput(uint32_t pressed) {
         using cssteroids::sio::Client;
         if (quitMenuInput(pressed)) return;
-        if (pressed & PAD_CIRCLE) { openQuitMenu(); return; }
+        if (pressed & PAD_OPTIONS) { openQuitMenu(); return; }
         if (coopMode && mp.coopOver && (pressed & PAD_CROSS)) { socket.emit("start-multiplayer-game"); return; } // replay in the same room
         if ((pressed & PAD_CROSS) && server.valid() && (socket.state() == Client::State::closed || mp.phase == cssteroids::mmo::Phase::failed))
             coopMode ? startCoopLobby() : startMmo();
@@ -677,13 +672,13 @@ class VulkanExample : public ps5ui::KitExample {
             centered(mp.coopWon ? "MISSION COMPLETE" : "GAME OVER", 440, 68, mp.coopWon ? 0x70e8a0 : 0xf47366);
             std::snprintf(line, sizeof line, "TEAM SCORE %d     ROUND %d / %d", mp.teamScore, mp.round, mp.maxRounds);
             centered(line, 520, 32);
-            centered("CROSS  Play again in this room     CIRCLE  Menu", 600, 26, 0x9fb3c8);
+            centered("CROSS  Play again in this room     OPTIONS  Menu", 600, 26, 0x9fb3c8);
         }
         centered(mpStatus, 1000, 22, mp.phase == cssteroids::mmo::Phase::playing ? 0x83bed4 : 0xf0c07d);
-        text("STICK / D-PAD  Turn     R2 / UP  Thrust     CROSS / R1  Fire     CIRCLE  Menu", 40, 1050, 20, 0x8293ab);
+        text("STICK / D-PAD  Turn     R2 / UP  Thrust     CROSS / R1  Fire     OPTIONS  Menu", 40, 1050, 20, 0x8293ab);
     }
 
-    // --- in-play menu (CIRCLE) ------------------------------------------------
+    // --- in-play menu (OPTIONS) ------------------------------------------------
     std::string quitLabel() const {
         if (screen == Screen::multiplayer) return coopMode ? "LEAVE ROOM" : "LEAVE WORLD";
         return testFlight ? "BACK TO EDITOR" : "QUIT TO TITLE";
@@ -696,7 +691,7 @@ class VulkanExample : public ps5ui::KitExample {
     bool quitMenuInput(uint32_t pressed) {
         if (!quitMenu) return false;
         if (pressed & (PAD_UP | PAD_DOWN)) quitIndex ^= 1;
-        const bool resume = (pressed & PAD_CIRCLE) || ((pressed & PAD_CROSS) && quitIndex == 0);
+        const bool resume = (pressed & PAD_OPTIONS) || ((pressed & PAD_CROSS) && quitIndex == 0);
         if (resume) { quitMenu = false; if (screen == Screen::game) paused = false; }
         else if ((pressed & PAD_CROSS) && quitIndex == 1) {
             quitMenu = false; paused = false;
@@ -718,7 +713,7 @@ class VulkanExample : public ps5ui::KitExample {
             if (i == quitIndex) scene.rounded_rect({760, 530 + i * 56.f - 34, 400, 46}, 8, Color::rgb(0x2a4a6a));
             centered(items[i], 530 + i * 56.f, 28, i == quitIndex ? 0xffffff : 0x9fb3c8);
         }
-        centered("UP/DOWN  Select     CROSS  Confirm     CIRCLE  Resume", 650, 18, 0x8293ab);
+        centered("UP/DOWN  Select     CROSS  Confirm     OPTIONS  Resume", 650, 18, 0x8293ab);
     }
 
     // --- ship editor ----------------------------------------------------------
@@ -1070,9 +1065,8 @@ class VulkanExample : public ps5ui::KitExample {
     }
     void gameInput(uint32_t pressed) {
         if (quitMenuInput(pressed)) return;
-        if (pressed & PAD_CIRCLE) { openQuitMenu(); return; }
+        if (pressed & PAD_OPTIONS) { openQuitMenu(); return; }
         if ((pressed & PAD_CROSS) && game.over) { if (testFlight) game.geometry = editorGeometry(); startGame(); }
-        if ((pressed & PAD_OPTIONS) && !game.over) paused = !paused;
         // Scores reach the production database only when the player asks.
         if ((pressed & PAD_TRIANGLE) && game.over && !testFlight && server.valid() && game.score > 0 && !submitted && !submitRequest.pending())
             submitRequest.start(server, "POST", cssteroids::api::high_scores_path,
