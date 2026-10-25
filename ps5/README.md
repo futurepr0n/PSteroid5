@@ -28,6 +28,8 @@ Plan: `../docs/plans/2026-10-23-ps5-native-port.md`.
   the server; ships made or loaded by passphrase update in place, gallery ships save as
   copies. Evidence: `../docs/ship-editor-report.md`.
 - Multiplayer: MMO (drop-in shared world) and MULTIPLAYER (two-pilot co-op rooms).
+- Power-ups, as the browser: extra life, rapid, spray and a 30 s shield, dropped by bullet
+  kills in single player, co-op and MMO (server-authoritative there), picked up on contact.
 - Not yet: enemies in single-player, audio.
 - Deliberate difference: the browser loses a life from both a timer and the
   explosion update; this port deducts exactly one life per hit.

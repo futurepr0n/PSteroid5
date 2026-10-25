@@ -199,6 +199,34 @@ class VulkanExample : public ps5ui::KitExample {
             scene.circle(tip[0], tip[1], 2 * scale, Color::rgb(0xff3000, .6f));
         }
     }
+    // PowerUp.draw: ring, then the type's art at 0.25 scale; blinks out near expiry
+    void drawPowerUp(const cssteroids::powerups::PowerUp &p, float x, float y, double rotation) {
+        using hui::gfx::Color;
+        namespace pu = cssteroids::powerups;
+        if (pu::blinked_out(p.ageMs)) return;
+        scene.ring(x, y, float(pu::radius), 1.5f, Color::rgb(pu::def(p.type).color));
+        for (const auto &l : pu::art_segments(p.type, x, y, rotation)) scene.line(float(l.x1), float(l.y1), float(l.x2), float(l.y2), 2, Color::rgb(l.color));
+    }
+    // Ship.drawShield
+    void drawShield(float x, float y, double msLeft) {
+        using hui::gfx::Color;
+        namespace pu = cssteroids::powerups;
+        if (!pu::shield_visible(msLeft)) return;
+        const uint32_t c = pu::def(pu::Type::shield).color;
+        scene.circle(x, y, float(pu::shield_radius), Color::rgb(c, .12f));
+        scene.ring(x, y, float(pu::shield_radius), 2, Color::rgb(c));
+    }
+    // drawEffectsHUD: one "Label: Ns" line per active timed effect
+    void drawEffectTimers(const cssteroids::powerups::Effects &e, float x, float y) {
+        namespace pu = cssteroids::powerups;
+        char line[48];
+        for (auto t : pu::types) {
+            if (!e.active(t)) continue;
+            std::snprintf(line, sizeof line, "%s: %ds", pu::def(t).label, int(std::ceil(e.ms[int(t)] / 1000)));
+            text(line, x, y, 26, pu::def(t).color);
+            y += 34;
+        }
+    }
     void drawWorld() {
         using hui::gfx::Color;
         for (const auto &a : game.asteroids) {
@@ -220,12 +248,15 @@ class VulkanExample : public ps5ui::KitExample {
             scene.line(b.x, b.y, b.x - std::sin(b.angle) * tail, b.y + std::cos(b.angle) * tail, 3, Color::rgb(color, .6f));
             scene.circle(b.x, b.y, 3 * (.8f + ratio * .4f), Color::rgb(color));
         }
+        for (const auto &p : game.powerUps) drawPowerUp(p, float(p.x), float(p.y), p.rotation);
         for (const auto &d : game.debris)
             scene.line(d.x, d.y, d.x + std::cos(d.rotation) * d.length, d.y + std::sin(d.rotation) * d.length, 2,
                        Color::rgb(d.color, d.life > .5f ? 1.f : d.life * 2));
         const auto &s = game.ship;
-        if (!game.over && !s.exploding && (!s.invulnerable() || int(s.invulnerableTime * 10) % 2 == 0))
+        if (!game.over && !s.exploding && (!s.invulnerable() || int(s.invulnerableTime * 10) % 2 == 0)) {
             drawShip(game.geometry, s.x, s.y, s.angle, 1, s.thrusting);
+            drawShield(s.x, s.y, s.effects.ms[int(cssteroids::powerups::Type::shield)]);
+        }
     }
     void drawTitle() {
         centered("PSTEROID5", 170, 96);
@@ -305,6 +336,7 @@ class VulkanExample : public ps5ui::KitExample {
         char line[160];
         std::snprintf(line, sizeof line, "Score: %d", game.score); text(line, 40, 60, 30);
         std::snprintf(line, sizeof line, "Lives: %d", game.lives); text(line, 1700, 60, 30);
+        if (!game.over) drawEffectTimers(game.ship.effects, 1700, 100);
         std::snprintf(line, sizeof line, testFlight ? "TEST FLIGHT  -  CIRCLE back to editor" : "Level %d", game.level); text(line, testFlight ? 700 : 900, 60, 26, 0x9fb3c8);
         if (game.levelBanner > 0 && !game.over) centered(line, 520, 64);
         text("STICK / D-PAD  Turn     R2 / UP  Thrust     CROSS / R1  Fire     OPTIONS  Pause     CIRCLE  Title", 40, 1050, 20, 0x8293ab);
@@ -597,22 +629,32 @@ class VulkanExample : public ps5ui::KitExample {
             scene.line(sx(b.x), sy(b.y), sx(b.x - std::sin(b.angle) * 10), sy(b.y + std::cos(b.angle) * 10), 3, Color::rgb(col, .6f));
             scene.circle(sx(b.x), sy(b.y), 3, Color::rgb(col));
         }
+        // power-up spin is time-based, as the browser's renderMMO
+        const double spin = now / 1000 * cssteroids::powerups::rotation_speed * 60;
+        for (const auto &[id, p] : mp.powerUps) if (visible(p.x, p.y, 20)) drawPowerUp(p, sx(p.x), sy(p.y), spin);
         for (const auto &bu : mp.bursts) {
             const float r = float(bu.age) * (bu.big ? 90.f : 40.f);
-            scene.ring(sx(bu.x), sy(bu.y), r, 2, Color::rgb(0xffa040, float(1 - bu.age)));
+            scene.ring(sx(bu.x), sy(bu.y), r, 2, Color::rgb(bu.color ? bu.color : 0xffa040, float(1 - bu.age)));
         }
+        const int shield = int(cssteroids::powerups::Type::shield);
         for (const auto &[id, p] : mp.players) {
             if (p.dead || p.outOfView || !visible(p.x, p.y, 40)) continue;
             drawShip(p.geometry, sx(p.x), sy(p.y), float(p.angle), 1, p.thrust);
+            drawShield(sx(p.x), sy(p.y), mp.effects_left(p.effects, now).ms[shield]);
             centered(p.name, sy(p.y) - 30, 18, 0x9fd3ff, sx(p.x));
         }
         const bool blink = mp.invulnerableMs > 0 && int(now / 100) % 2;
-        if (!mp.dead && !blink && mp.phase == cssteroids::mmo::Phase::playing) drawShip(ship.geometry, sx(mp.x), sy(mp.y), float(mp.angle), 1, mp.thrusting);
+        const auto myEffects = mp.effects_left(mp.effects, now);
+        if (!mp.dead && !blink && mp.phase == cssteroids::mmo::Phase::playing) {
+            drawShip(ship.geometry, sx(mp.x), sy(mp.y), float(mp.angle), 1, mp.thrusting);
+            drawShield(sx(mp.x), sy(mp.y), myEffects.ms[shield]);
+        }
         if (mp.phase == cssteroids::mmo::Phase::warping) scene.ring(sx(mp.x), sy(mp.y), 30 + 10 * std::sin(float(now) / 120), 2, Color::rgb(0x70caff));
         int mine = 0;
         for (const auto &e2 : mp.scores) if (e2.id == mp.myId) mine = e2.score;
         char line[128];
         std::snprintf(line, sizeof line, "Score: %d", mine); text(line, 40, 60, 30);
+        if (!mp.dead) drawEffectTimers(myEffects, 40, 100);
         text(mp.mode == "coop" ? "CO-OP" : "SHARED WORLD", 860, 60, 26, 0x9fb3c8);
         if (mp.mode == "coop") { std::snprintf(line, sizeof line, "Round %d/%d   Lives %d", mp.round, mp.maxRounds, mp.lives); text(line, 1500, 60, 26); }
         text("LEADERBOARD", 1640, 120, 20, 0xffd700);

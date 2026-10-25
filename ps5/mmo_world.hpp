@@ -5,6 +5,7 @@
 // caller supplies the clock and moves events/emits through socketio.hpp.
 #include "asteroids_core.hpp"
 #include "json_lite.hpp"
+#include "powerups.hpp"
 #include "ship_design.hpp"
 #include <cmath>
 #include <cstdint>
@@ -20,7 +21,7 @@
 #endif
 
 namespace cssteroids::mmo {
-constexpr int tick_ms = 50, frames_per_tick = 3, protocol_version = 4, id_block = 8;
+constexpr int tick_ms = 50, frames_per_tick = 3, protocol_version = 5, id_block = 8;
 constexpr int max_sync_ticks = 600;
 // Others are drawn this far behind the server clock. Players: 2 ticks (as the browser) when the
 // server sends velocity, so late snapshots can glide; 3 ticks for servers without it.
@@ -266,9 +267,10 @@ struct RemotePlayer {
     ShipGeometry geometry;
     double x = 0, y = 0, angle = 0;
     bool dead = false, thrust = false, outOfView = false;
+    powerups::EffectTicks effects;
 };
 struct Enemy { std::string id; double x = 0, y = 0, a = 0; bool outOfView = false; };
-struct Burst { double x, y, age = 0; bool big; };
+struct Burst { double x, y, age = 0; bool big; uint32_t color = 0; }; // color: power-up pickup
 // Moments the game plays a sound for; `mine` marks the player's own (always heard, full volume).
 struct SoundCue { enum Kind { shot, explosion, asteroid, boundary } kind; double x = 0, y = 0; int size = 0; bool mine = false; };
 
@@ -289,6 +291,8 @@ public:
     std::map<int64_t, AsteroidRecord> asteroids;
     std::map<std::string, RemotePlayer> players;
     std::map<std::string, Enemy> enemies;
+    std::map<int64_t, powerups::PowerUp> powerUps;
+    powerups::EffectTicks effects;    // own timed effects (server end ticks)
     std::vector<Bullet> bullets;      // own, remote replays and enemy rounds
     std::vector<Burst> bursts;
     std::vector<SoundCue> cues;       // drained by the game each frame
@@ -338,6 +342,9 @@ public:
         else if (name == "mmo-asteroid-spawn") { AsteroidRecord a; if (read_asteroid(d, a)) asteroids[a.id] = a; }
         else if (name == "mmo-asteroid-destroyed") on_asteroid_destroyed(d);
         else if (name == "mmo-asteroid-check") on_asteroid_check(d);
+        else if (name == "mmo-powerup-spawned") { powerups::PowerUp p; if (read_power_up(d, p)) powerUps[p.id] = p; }
+        else if (name == "mmo-powerup-expired") powerUps.erase(int64_t(d.num("id")));
+        else if (name == "mmo-powerup-taken") on_power_up_taken(d);
         else if (name == "mmo-enemy-spawn") {
             if (d.is_array() && d.items.size() >= 3) { Enemy e; e.id = id_of(d.items[0]); e.x = d.items[1].n; e.y = d.items[2].n; enemies[e.id] = e; }
         } else if (name == "mmo-enemy-destroyed") {
@@ -359,7 +366,9 @@ public:
                 const auto it = players.find(shooter);
                 auto shots = create_shot_bullets(b->num("x"), b->num("y"), b->num("angle"), b->num("vx"), b->num("vy"),
                                                  it != players.end() ? it->second.geometry.weapons : std::vector<Point>{});
-                for (auto &s : shots) { s.owner = shooter; bullets.push_back(s); }
+                powerups::WeaponEffects fx;
+                if (const auto *e = d.get("effects"); e && e->is_object()) { fx.rapid = e->get("rapid") && e->get("rapid")->b; fx.spray = e->get("spray") && e->get("spray")->b; }
+                for (auto &s : powerups::apply_weapon_effects(shots, fx)) { s.owner = shooter; bullets.push_back(s); }
             }
         } else if (name == "mmo-player-joined") {
             RemotePlayer p; p.id = d.str("playerId"); p.name = d.str("playerName", "Pilot").substr(0, 20);
@@ -372,8 +381,8 @@ public:
             bursts.push_back({d.num("x"), d.num("y"), 0, true});
             if (who != myId) cues.push_back({SoundCue::explosion, d.num("x"), d.num("y")});
             else if (!dead) cues.push_back({SoundCue::explosion, x, y, 0, true}); // the server saw it first
-            if (who == myId) { dead = true; respawnCountdownMs = 3000; thrusting = false; }
-            else if (auto it = players.find(who); it != players.end()) it->second.dead = true;
+            if (who == myId) { dead = true; respawnCountdownMs = 3000; thrusting = false; effects.clear(); }
+            else if (auto it = players.find(who); it != players.end()) { it->second.dead = true; it->second.effects.clear(); }
         } else if (name == "mmo-respawn") {
             x = d.num("x", x); y = d.num("y", y); angle = d.num("angle", 0); vx = vy = 0;
             dead = false; invulnerableMs = 3000; respawnCountdownMs = 0;
@@ -415,6 +424,20 @@ public:
         // asteroid records follow the server tick; optimistic hides expire
         const int64_t tick = int64_t(std::floor(server_tick(nowMs)));
         for (auto &[id, a] : asteroids) { advance_to(a, tick, bounds); if (a.hiddenUntilMs && nowMs > a.hiddenUntilMs) a.hiddenUntilMs = 0; }
+        // power-ups advance in whole ticks from their spawn records and lapse at expireTick
+        std::erase_if(powerUps, [&](const auto &kv) { return tick >= kv.second.expireTick; });
+        for (auto &[id, p] : powerUps) {
+            powerups::sync_to_tick(p, tick, bounds.width, bounds.height, frames_per_tick);
+            p.ageMs = powerups::life_ms - (double(p.expireTick) - server_tick(nowMs)) * tick_ms;
+        }
+        // claim a touched power-up; the server decides, so retry only if it is still here after a while
+        if (phase == Phase::playing && !dead)
+            for (auto &[id, p] : powerUps) {
+                if (nowMs - p.claimedAtMs < 500 || !powerups::is_pickup(x, y, p)) continue;
+                p.claimedAtMs = nowMs;
+                json::Value c = json::Value::object(); c.set("id", json::Value::number_value(double(id)));
+                emit("mmo-powerup-pickup", std::move(c));
+            }
         // remote players / enemies from the snapshot buffers, 2 ticks behind
         // Others are drawn a little in the past so there is a later sample to blend toward:
         // players update every tick, enemies every 2; the extra tick absorbs network jitter.
@@ -444,6 +467,10 @@ public:
 
     std::vector<Outgoing> take_outbox() { std::vector<Outgoing> out; out.swap(outbox); return out; }
     bool asteroid_visible(const AsteroidRecord &a) const { return a.hiddenUntilMs == 0; }
+    // Timed effects as milliseconds left on the synced clock (HUD, shield bubbles, own shots).
+    powerups::Effects effects_left(const powerups::EffectTicks &t, double nowMs) const {
+        return t.left(server_tick(nowMs), tick_ms);
+    }
     // Asteroid position extrapolated inside the current tick (game.js:2337-2348).
     void asteroid_render_pos(const AsteroidRecord &a, double nowMs, double &rx, double &ry, double &rot) const {
         const double frac = std::clamp(server_tick(nowMs) - double(a.tick), 0.0, 1.0) * frames_per_tick;
@@ -480,6 +507,32 @@ private:
         build_shape(a);
         return true;
     }
+    static void read_effects(const json::Value *e, powerups::EffectTicks &out) {
+        out.clear();
+        if (!e || !e->is_object()) return;
+        for (auto t : powerups::types) if (const auto *v = e->get(powerups::def(t).key); v && v->type == json::Value::Type::number) out.until[int(t)] = v->n;
+    }
+    static bool read_power_up(const json::Value &d, powerups::PowerUp &p) {
+        if (!d.is_object() || !d.get("id")) return false;
+        const auto type = powerups::type_from(d.str("type"));
+        if (!type) return false;
+        p.id = int64_t(d.num("id")); p.type = *type;
+        p.x = d.num("x"); p.y = d.num("y"); p.vx = d.num("vx"); p.vy = d.num("vy");
+        p.simTick = int64_t(d.num("tick")); p.expireTick = int64_t(d.num("expireTick"));
+        return true;
+    }
+    void on_power_up_taken(const json::Value &d) {
+        if (!d.is_object()) return;
+        if (auto it = powerUps.find(int64_t(d.num("id"))); it != powerUps.end()) {
+            bursts.push_back({it->second.x, it->second.y, 0, false, powerups::def(it->second.type).color});
+            powerUps.erase(it);
+        }
+        const auto type = powerups::type_from(d.str("type"));
+        if (!type || *type == powerups::Type::life) return; // lives arrive as mmo-lives
+        const std::string who = d.str("playerId");
+        if (who == myId) effects.until[int(*type)] = d.num("untilTick");
+        else if (auto it = players.find(who); it != players.end()) it->second.effects.until[int(*type)] = d.num("untilTick");
+    }
     void on_join(const json::Value &d, double nowMs) {
         const auto *p = d.get("player");
         if (!p || !p->is_object()) { phase = Phase::failed; failure = "malformed join reply"; return; }
@@ -503,8 +556,12 @@ private:
                 rp.name = item.str("name", "Pilot").substr(0, 20); rp.x = item.num("x"); rp.y = item.num("y"); rp.angle = item.num("angle");
                 rp.dead = item.get("dead") && item.get("dead")->b;
                 if (const auto *sd = item.get("shipData")) rp.geometry = geometry_from(*sd);
+                read_effects(item.get("effects"), rp.effects);
                 players[rp.id] = rp;
             }
+        powerUps.clear(); effects.clear();
+        if (const auto *list = d.get("powerUps"); list && list->is_array())
+            for (const auto &item : list->items) { powerups::PowerUp pu; if (read_power_up(item, pu)) powerUps[pu.id] = pu; }
         phase = Phase::warping; joinedAtMs = nowMs; invulnerableMs = 1e9;
         show(mode == "coop" ? "CO-OP ROUND " + std::to_string(round) : "ENTERING THE SHARED WORLD");
     }
@@ -604,7 +661,8 @@ private:
             if (shootCooldown > 0) shootCooldown -= dt;
             if (phase == Phase::playing && in.fire && shootCooldown <= 0) {
                 shootCooldown = 0.25;
-                for (auto &b : create_shot_bullets(x, y, angle, vx, vy, design.geometry.weapons)) bullets.push_back(b);
+                const auto fx = effects.left(server_tick(nowMs), tick_ms).weapons();
+                for (auto &b : powerups::apply_weapon_effects(create_shot_bullets(x, y, angle, vx, vy, design.geometry.weapons), fx)) bullets.push_back(b);
                 json::Value s = json::Value::object();
                 s.set("x", json::Value::number_value(x)); s.set("y", json::Value::number_value(y));
                 s.set("angle", json::Value::number_value(angle));
@@ -635,6 +693,8 @@ private:
             if (hit) bullets.erase(bullets.begin() + long(i));
         }
         if (phase != Phase::playing || dead || invulnerableMs > 0) return;
+        // shielded: pass through; the server would refuse the claim anyway
+        if (effects.left(server_tick(nowMs), tick_ms).active(powerups::Type::shield)) return;
         // own death: report what we touched; the server checks plausibility
         auto report = [&](const char *type, json::Value objectId, bool collision) {
             json::Value r = json::Value::object();

@@ -1,7 +1,8 @@
 // Dev-only local MMO/co-op server for PSteroids5 tests: the REAL CSSteroids-2 world engine
 // (required read-only from ../../../CSSTeroids-2/server/world-engine.js) behind handlers copied
 // from CSSTeroids-2 server.js at e3b17db: simple-session REST (84-161), join-simple-session
-// (472-538), start-multiplayer-game (406-442) and the MMO events (545-710). No Express/MySQL.
+// (472-538), start-multiplayer-game (406-442) and the MMO events (545-710), with the power-up
+// additions from f243bb1 (join powerUps/effects, mmo-powerup-pickup, shield checks). No Express/MySQL.
 // Prints the port. Usage: node mmo-server.js [port] [host]
 const path = require('path');
 const { createServer } = require('http');
@@ -10,7 +11,8 @@ const ref = path.resolve(__dirname, '..', '..', '..', 'CSSTeroids-2');
 const {
   COOP_CONFIG, createWorld: createEngineWorld, startWorldLoop, stopWorldLoop, destroyMMOAsteroid, removeMMOEnemy,
   sendFullScores, sanitizeViewport, joinPlayer, markPlayerReady, activePlayer, asteroidSnapshot, handleShoot,
-  handlePlayerUpdate, killPlayer, contactPlausible, countEvent, eventStatsLine
+  handlePlayerUpdate, killPlayer, contactPlausible, countEvent, eventStatsLine, powerUpSnapshot, activeEffects, effectActive,
+  handlePowerUpPickup
 } = require(path.join(ref, 'server', 'world-engine'));
 const { TICK_MS } = require(path.join(ref, 'public', 'js', 'shared', 'world-sim'));
 const { sanitizeMMOShipData } = require(path.join(ref, 'utils', 'helpers'));
@@ -132,8 +134,8 @@ io.on('connection', socket => {
       player, sessionId: world.id, mode: world.mode, round: world.round, maxRounds: COOP_CONFIG.maxRounds, lives: world.lives,
       worldBounds: { width: world.worldWidth, height: world.worldHeight }, asteroids: asteroidSnapshot(world),
       enemies: Array.from(world.enemies.values()),
-      players: Array.from(world.players.values()).map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, angle: p.angle, score: p.score, dead: p.dead, shipData: p.shipData })),
-      tick: world.tick, serverTime: world.tick * TICK_MS
+      players: Array.from(world.players.values()).map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, angle: p.angle, score: p.score, dead: p.dead, shipData: p.shipData, effects: activeEffects(world, p) })),
+      powerUps: powerUpSnapshot(world), tick: world.tick, serverTime: world.tick * TICK_MS
     });
     socket.to(world.room).emit('mmo-player-joined', { playerId: socket.id, playerName: player.name, x: player.x, y: player.y, angle: player.angle, shipData: player.shipData });
     sendFullScores(world, socket.id);
@@ -162,17 +164,18 @@ io.on('connection', socket => {
   socket.on('mmo-player-died', data => {
     const world = worlds.get(socket.worldId); if (!world) return;
     const player = activePlayer(world, socket.id); if (!player) return;
-    if (!contactPlausible(world, player, data)) { countEvent(world, 'deathRejected'); socket.emit('mmo-respawn', { x: player.x, y: player.y, angle: player.angle }); return; }
+    if (effectActive(world, player, 'shield') || !contactPlausible(world, player, data)) { countEvent(world, 'deathRejected'); socket.emit('mmo-respawn', { x: player.x, y: player.y, angle: player.angle }); return; }
     killPlayer(world, player);
   });
   socket.on('mmo-ship-collision', data => {
     const world = worlds.get(socket.worldId); if (!world) return;
     const player = activePlayer(world, socket.id);
-    if (!player || data?.type === 'enemyBullet' || !contactPlausible(world, player, data)) { countEvent(world, 'collisionRejected'); return; }
+    if (!player || data?.type === 'enemyBullet' || effectActive(world, player, 'shield') || !contactPlausible(world, player, data)) { countEvent(world, 'collisionRejected'); return; }
     if (data.type === 'asteroid') destroyMMOAsteroid(world, world.asteroids.get(data.objectId), socket.id);
     else removeMMOEnemy(world, world.enemies.get(data.objectId), socket.id);
     killPlayer(world, player);
   });
+  socket.on('mmo-powerup-pickup', data => { const w = worlds.get(socket.worldId); if (w) handlePowerUpPickup(w, socket.id, data); });
   socket.on('mmo-bullet-hit', () => { const w = worlds.get(socket.worldId); if (w && activePlayer(w, socket.id)) countEvent(w, 'hitPredicted'); });
   socket.on('mmo-ship-data', data => {
     const world = worlds.get(socket.worldId); if (!world) return;
