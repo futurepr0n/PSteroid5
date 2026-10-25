@@ -2,6 +2,7 @@
 // Portable CSSteroids simulation, translated from public/js/entities/*.js and
 // public/js/core/game.js (single-player). The JS physics is per animation frame,
 // so the core steps at a fixed 60 Hz and the renderer interpolates.
+#include "powerups.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -71,7 +72,9 @@ struct Ship {
     float radius = 15;
     bool thrusting = false, exploding = false;
     float shootTimer = 0, explodeTime = 0, invulnerableTime = 0;
+    powerups::Effects effects;
     bool invulnerable() const { return invulnerableTime > 0; }
+    bool shielded() const { return effects.active(powerups::Type::shield); }
 };
 
 struct Asteroid {
@@ -108,17 +111,19 @@ public:
     std::vector<Asteroid> asteroids;
     std::vector<Bullet> bullets;
     std::vector<Debris> debris;
+    std::vector<powerups::PowerUp> powerUps;
+    Rng dropRng; // drops and pickup bursts, so they leave the asteroid sequence alone
     std::vector<Event> events; // cleared by the caller each rendered frame
     std::vector<int> brokenSizes; // size of each asteroid_hit, in order; cleared with events
     int score = 0, lives = 3, level = 1;
     bool over = false;
     float levelBanner = 0, time = 0;
 
-    explicit Game(uint32_t seed = 1) : rng(seed) { reset(); }
+    explicit Game(uint32_t seed = 1) : rng(seed), dropRng(seed ^ 0x9e3779b9u) { reset(); }
 
     void reset() {
         ship = Ship{};
-        bullets.clear(); debris.clear(); events.clear(); brokenSizes.clear();
+        bullets.clear(); debris.clear(); powerUps.clear(); events.clear(); brokenSizes.clear();
         score = 0; lives = 3; level = 1; over = false; time = 0;
         levelBanner = 2;
         spawn_level();
@@ -171,6 +176,7 @@ public:
         std::erase_if(bullets, [](const Bullet &b) {
             return b.life >= b.maxLife || b.speed <= .5f || b.x < 0 || b.x > board_width || b.y < 0 || b.y > board_height;
         });
+        step_power_ups();
         collide();
         if (!ship.exploding && asteroids.empty()) {
             level++;
@@ -188,6 +194,7 @@ private:
             if (s.explodeTime > 1) respawn();
             return;
         }
+        s.effects.tick(step_seconds * 1000);
         s.angle += std::clamp(in.turn, -1.f, 1.f) * .08f;
         s.thrusting = in.thrust;
         if (s.thrusting) {
@@ -213,14 +220,19 @@ private:
 
     // WorldSim.createShotBullets + Bullet (single-player speeds): one round from
     // the nose, or one per weapon point with 0.75x speed and 0.7x life when several.
+    // Spray fans each round over powerups::spray_angles; rapid doubles its speed.
     void fire_from(const Ship &s) {
         const float sn = std::sin(s.angle), cs = std::cos(s.angle);
         const bool multi = geometry.weapons.size() > 1;
-        const float speed = multi ? 4.5f : 6.f, life = multi ? 1.05f : 1.5f;
+        const auto fx = s.effects.weapons();
+        const float speed = (multi ? 4.5f : 6.f) * float(fx.rapid ? powerups::rapid_speed_mult : 1), life = multi ? 1.05f : 1.5f;
         auto add = [&](float x, float y) {
-            Bullet b{x, y, s.angle, speed, speed, 0, life};
-            b.vx0 = s.vx * .5f; b.vy0 = s.vy * .5f;
-            bullets.push_back(b);
+            for (size_t i = 0; i < powerups::spray_angles.size(); i++) {
+                if (!fx.spray && i != 2) continue;
+                Bullet b{x, y, s.angle + float(powerups::spray_angles[i]), speed, speed, 0, life};
+                b.vx0 = s.vx * .5f; b.vy0 = s.vy * .5f;
+                bullets.push_back(b);
+            }
         };
         if (geometry.weapons.empty()) add(s.x + sn * s.radius, s.y - cs * s.radius);
         for (const auto &p : geometry.weapons) add(s.x + p.x * cs - p.y * sn, s.y + p.x * sn + p.y * cs);
@@ -239,6 +251,33 @@ private:
         ship.invulnerableTime = 3;
     }
 
+    // game.js dropPowerUp / updatePowerUps / collectPowerUp (single player: every type)
+    void drop_power_up(powerups::Source source, float x, float y) {
+        const auto type = powerups::roll_drop(source, [&] { return dropRng.next(); });
+        if (!type) return;
+        const float heading = dropRng.next() * pi * 2, drift = dropRng.next() * float(powerups::max_drift);
+        powerups::PowerUp p;
+        p.type = *type; p.x = x; p.y = y; p.vx = std::cos(heading) * drift; p.vy = std::sin(heading) * drift;
+        powerUps.push_back(p);
+    }
+
+    void step_power_ups() {
+        for (size_t i = powerUps.size(); i-- > 0;) {
+            auto &p = powerUps[i];
+            powerups::step(p, board_width, board_height);
+            p.rotation += powerups::rotation_speed;
+            p.ageMs += step_seconds * 1000;
+            if (p.ageMs >= powerups::life_ms) {
+                powerUps.erase(powerUps.begin() + long(i));
+            } else if (!ship.exploding && powerups::is_pickup(ship.x, ship.y, p)) {
+                if (p.type == powerups::Type::life) lives++;
+                else ship.effects.add(p.type);
+                burst(float(p.x), float(p.y), 10, powerups::def(p.type).color);
+                powerUps.erase(powerUps.begin() + long(i));
+            }
+        }
+    }
+
     static void wrap(float &x, float &y, float r) {
         if (x < -r) x = board_width + r; else if (x > board_width + r) x = -r;
         if (y < -r) y = board_height + r; else if (y > board_height + r) y = -r;
@@ -253,10 +292,20 @@ private:
         }
     }
 
+    // Debris.js in a single colour (createPickupBurst)
+    void burst(float x, float y, int count, uint32_t color) {
+        for (int i = 0; i < count; i++) {
+            const float angle = dropRng.next() * pi * 2, speed = .5f + dropRng.next() * 1.5f;
+            debris.push_back({x, y, std::cos(angle) * speed, std::sin(angle) * speed, angle,
+                              (dropRng.next() - .5f) * .2f, 5 + dropRng.next() * 10, 1.f, color});
+        }
+    }
+
     void split(size_t index) {
         const Asteroid a = asteroids[index];
         score += (4 - a.size) * 100;
         burst(a.x, a.y, a.size * 5, false);
+        drop_power_up(powerups::Source::asteroid, a.x, a.y);
         asteroids.erase(asteroids.begin() + long(index));
         if (a.size > 1) for (int i = 0; i < 2; i++) asteroids.push_back(make_asteroid(a.x, a.y, a.size - 1));
         events.push_back(Event::asteroid_hit);
@@ -264,10 +313,11 @@ private:
     }
 
     void collide() {
-        if (!ship.exploding && !ship.invulnerable()) {
+        if (!ship.exploding && !ship.invulnerable() && !ship.shielded()) {
             for (const auto &a : asteroids) {
                 if (ship_hits(a.x, a.y, a.radius)) {
                     ship.exploding = true; ship.explodeTime = 0;
+                    ship.effects.clear();
                     burst(ship.x, ship.y, 20, true);
                     events.push_back(Event::ship_hit);
                     break;

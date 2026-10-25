@@ -107,7 +107,7 @@ static void offline() {
     auto out = s.take_outbox();
     CHECK(out.size() == 1 && out[0].name == "mmo-join");
     const auto &j = out[0].data;
-    CHECK(j.str("sessionId") == "mmo_world" && j.num("protocol") == 4 && j.get("viewport")->num("w") == 1920);
+    CHECK(j.str("sessionId") == "mmo_world" && j.num("protocol") == 5 && j.get("viewport")->num("w") == 1920);
     const auto *sd = j.get("playerData")->get("shipData");
     CHECK(j.get("playerData")->str("name") == "PS5 Tester" && sd->str("shipType") == "custom");
     CHECK(sd->get("customLines")->items.size() == 1 && sd->get("customLines")->items[0].num("startY") == -60);

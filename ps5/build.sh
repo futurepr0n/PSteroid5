@@ -22,9 +22,11 @@ if [[ ! -f $host/$stamp ]]; then
     touch "$host/$stamp"
 fi
 
-# Portable tests: simulation, then JSON/HTTP/TLS against loopback fixtures.
+# Portable tests: simulation and power-ups, then JSON/HTTP/TLS against loopback fixtures.
 g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/test_core.cpp" -o "$app/test-core"
 "$app/test-core"
+g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/test_powerups.cpp" -o "$app/test-powerups"
+"$app/test-powerups"
 g++ -std=c++20 -O2 -Wall -Wextra -pedantic -pthread "${tls[@]}" "$repo/ps5/test_net.cpp" "$host/libmbedtls.a" -o "$app/test-net"
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 -subj /CN=localhost \
     -addext subjectAltName=DNS:localhost -keyout "$app/fixture.key" -out "$app/fixture.crt" 2>/dev/null

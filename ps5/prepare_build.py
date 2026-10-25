@@ -7,7 +7,7 @@ from pathlib import Path
 import json, shutil, subprocess, sys, hashlib
 
 PORT_REVISION = 'm3-https-server-api-2026-10-23'
-HEADERS = ['asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp', 'socketio.hpp', 'mmo_world.hpp', 'coop_lobby.hpp', 'ship_render.hpp', 'sound.hpp', 'ship_editor.hpp']
+HEADERS = ['powerups.hpp', 'asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp', 'socketio.hpp', 'mmo_world.hpp', 'coop_lobby.hpp', 'ship_render.hpp', 'sound.hpp', 'ship_editor.hpp']
 
 repo = Path(sys.argv[1]).resolve()
 # ps5/sce_sys/param.json is the title's identity (the catalog reads it from the repository).

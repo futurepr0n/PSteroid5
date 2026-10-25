@@ -7,14 +7,15 @@ CSSTeroids-2. Server: socket.io 4.8.1 / Engine.IO v4.
 - `wss://asteroids.futurepr0n.com/socket.io/?EIO=4&transport=websocket` (nginx/openresty
   proxies 443 → 6161). No auth, no query params, CORS `*`, no origin check, no middleware.
 - Engine.IO ping/pong defaults (25 s / 20 s): answer `2` with `3`.
-- `socket.id` is the player id everywhere. The only version gate is `protocol: 4` in `mmo-join`;
-  a mismatch gets `mmo-reload {protocol:4}`.
+- `socket.id` is the player id everywhere. The only version gate is `protocol` in `mmo-join`:
+  the server (protocol 5 since f243bb1, power-ups) accepts 4 and 5 and answers anything else with
+  `mmo-reload`. PSteroid5 sends 5; protocol-4 clients still play but never see power-ups.
 
 ## Constants (public/js/shared/world-sim.js, server/world-engine.js)
 TICK_MS 50 (20 Hz), FRAMES_PER_TICK 3, SHIP_RADIUS 15, VIEW_MARGIN 200, BULLET_SPEED 8,
 BULLET_LIFE 1.8 s, ID_BLOCK 8, MAX_SYNC_TICKS 600, RESPAWN_TICKS 60, WARP_MAX_TICKS 100,
 LAG_COMP_TICKS 4, ENEMY_SNAPSHOT_TICKS 2, ASTEROID_CHECK_TICKS 100, SCORES_TICKS 20.
-Server time = `tick * 50` ms (engine counter). PROTOCOL_VERSION 4.
+Server time = `tick * 50` ms (engine counter). PROTOCOL_VERSION 5 (MIN_PROTOCOL_VERSION 4).
 
 ## Worlds
 - **MMO**: a single persistent world `'mmo_world'`. Max players: env (default 5). Size: 2000x1500
@@ -36,8 +37,9 @@ Server time = `tick * 50` ms (engine counter). PROTOCOL_VERSION 4.
 | `mmo-ready` | – | Ends warp. Send after the clock offset is known, ≥1 `mmo-state` has arrived and ≥1.5 s have passed |
 | `mmo-player-update` | `[round(x), round(y), round2(angle), round2(vx), round2(vy), thrust?1:0]` | Every 50 ms. Skip if unchanged, but heartbeat at least 1 Hz. Server clamps to bounds, ≤22.5 px/tick and |v|≤5, with no correction sent back |
 | `mmo-shoot` | `{x,y,angle,vx,vy,tick:floor(serverTick)}` | ≤5 per 1 s and ≥150 ms apart, otherwise silently dropped. Origin >100 px from the server pose → the server pose is used. Lag rewind 0..4 ticks |
-| `mmo-player-died` | `{type:'enemyBullet'|'asteroid'|'enemy', objectId, x, y}` | Plausibility check: within objR+15+60. If implausible the server replies `mmo-respawn` (un-kill) |
-| `mmo-ship-collision` | `{type:'asteroid'|'enemy', objectId, x, y}` | The server destroys the object and kills the player; no score |
+| `mmo-player-died` | `{type:'enemyBullet'|'asteroid'|'enemy', objectId, x, y}` | Plausibility check: within objR+15+60. If implausible, or the player's shield is active, the server replies `mmo-respawn` (un-kill). Do not send while your own shield is active |
+| `mmo-ship-collision` | `{type:'asteroid'|'enemy', objectId, x, y}` | The server destroys the object and kills the player; no score. Silently rejected while shielded (neither is destroyed) |
+| `mmo-powerup-pickup` | `{id}` (integer) | Send when your ship touches a power-up (`isPickup`); resend at most every 500 ms while it is still there. Accepted if alive, not warping, within 14+15+60 px of the server's pose, ≤10 attempts per 20 ticks; first valid claim wins. No reply on rejection |
 | `mmo-bullet-hit` | `{type, objectId, x, y}` | Hint only; optional |
 | `mmo-ship-data` | `{shipData}` | Relayed; also changes your server-side weapon points |
 | `mmo-leave` | – | |
@@ -47,7 +49,7 @@ Angles are in game convention (0 = up, x += sin, y -= cos). Velocities are px pe
 ## Server → client
 | Event | Payload |
 |---|---|
-| `mmo-join-success` | `{player:{id, idx, ...}, sessionId, mode, round, maxRounds, lives, worldBounds:{width,height}, asteroids:[full], enemies:[full], players:[{id,name,x,y,angle,score,dead,shipData}] (incl. self), tick, serverTime}` |
+| `mmo-join-success` | `{player:{id, idx, ...}, sessionId, mode, round, maxRounds, lives, worldBounds:{width,height}, asteroids:[full], enemies:[full], players:[{id,name,x,y,angle,score,dead,shipData,effects}] (incl. self), powerUps:[{id,type,x,y,vx,vy,tick,expireTick}], tick, serverTime}`. `effects` is `{rapid?, spray?, shield?: untilTick}` (active ones only; your own is `{}`); power-up records are rebased to the current tick |
 | `mmo-join-error` | `{error}` |
 | `mmo-state` | `{t, p:[[id,x,y,a,dead,thrust]], e:[[id,x,y,a_math]] (even ticks), g?:[ids out of view]}`. Delta-coded per viewer; never contains yourself. Interpolate 100 ms behind (render at serverTick−2) using the SnapshotBuffer hold-last rule |
 | `mmo-asteroid-spawn` | `{id,x,y,vx,vy,size,radius,rotation,rotationSpeed,seed,spawnTick}` |
@@ -56,14 +58,17 @@ Angles are in game convention (0 = up, x += sin, y -= cos). Velocities are px pe
 | `mmo-enemy-spawn` | `[id,x,y,vx,vy]` |
 | `mmo-enemy-destroyed` | `[id, killerIdx]` |
 | `mmo-enemy-shoot` | `{enemyId,x,y,angle_math}`. Bullet at angle+π/2, with no inherited velocity |
-| `mmo-bullet-fired` | `{bullet:{x,y,angle,vx,vy}, playerId}`. Visual replay using the shooter's weaponPoints |
+| `mmo-bullet-fired` | `{bullet:{x,y,angle,vx,vy}, playerId, effects?:{rapid,spray}}`. Visual replay using the shooter's weaponPoints, then `applyWeaponEffects` with `effects` (absent = none) |
+| `mmo-powerup-spawned` | `{id, type:'life'|'rapid'|'spray'|'shield', x, y, vx, vy (2 dp), tick, expireTick}`. Position at `tick`; sent to the whole world |
+| `mmo-powerup-expired` | `{id}`. Also drop it locally at `expireTick` without the event |
+| `mmo-powerup-taken` | `{id, playerId, type, untilTick}`. Remove it (pickup burst). Non-life: that player's `effects[type] = untilTick`; apply your own effects only from this event. Life: `untilTick` null, lives follow as `mmo-lives` |
 | `mmo-player-joined` / `-left` | `{playerId, playerName, x, y, angle, shipData}` / `{playerId, playerName}` |
 | `mmo-player-died` | `{playerId,x,y}` |
 | `mmo-respawn` | `{x,y,angle}` (you). Zero velocity, 3 s client-side invulnerability |
 | `mmo-player-respawned` | `{playerId,x,y}` |
 | `mmo-ship-data` | `{playerId, shipData}` |
 | `mmo-scores` | `{players:[[id,name,score]], left?:[ids], full?:true}`. `full` replaces, `left` deletes, entries upsert, sort descending |
-| co-op | `mmo-round-start {round,maxRounds}`, `mmo-round-cleared`, `mmo-lives {lives,lostBy}`, `mmo-game-over` / `mmo-game-complete {round,teamScore}` |
+| co-op | `mmo-round-start {round,maxRounds}`, `mmo-round-cleared`, `mmo-lives {lives,lostBy}` or `{lives,gainedBy}` (life power-up), `mmo-game-over` / `mmo-game-complete {round,teamScore}` |
 
 ## Deterministic asteroids (must be bit-exact)
 - `stepAsteroid` once per tick: pos += v·3 and rot += rs·3, then clamp to the radius from each edge and reflect the velocity.
@@ -85,11 +90,23 @@ Angles are in game convention (0 = up, x += sin, y -= cos). Velocities are px pe
 | Destruction | Server events; the client hides the target optimistically and restores it after 300 ms + RTT without confirmation |
 | Own death | Client-detected, server-checked |
 | Respawn, lives | Server |
+| Power-up drops, pickups, effects | Server; clients claim and wait for `mmo-powerup-taken` |
 
 ## Bullets (createShotBullets)
 - No weapon points: one bullet at nose+15, speed 8, life 1.8 s.
 - Two weapon points: rotated origins, speed 6, life 1.26 s.
 - v = dir·speed + shipV·0.5. Per frame: pos += v, speed *= 0.99, then v is recomputed from the angle.
+
+## Power-ups (public/js/shared/powerups.js; ported in ps5/powerups.hpp)
+- Drops only from server bullet kills: asteroid 10%, enemy 25%. MMO drops rapid/spray/shield; co-op
+  also drops life. At most 30 live per world. Ids are integers per world.
+- Each tick: if `tick >= expireTick` remove, else `stepPowerUp(p, worldBounds, 3)`: ONE call with
+  frames = 3 (pos += v·3, then clamp to 14 px from each edge and reflect), not three calls of 1.
+- Lifetime 240 ticks (12 s), blinking in the last 3 s. Pickup reach: distance ≤ 15 + 14.
+- Effects: rapid and spray 400 ticks, shield 600 ticks; a pickup refreshes `untilTick`. Active while
+  `untilTick > serverTick`. A death (`mmo-player-died` for that player) clears them; `mmo-respawn` does not.
+- Rapid doubles bullet speed (same life); spray fans each bullet over −40, −20, 0, 20, 40° keeping
+  the ship-velocity carry. A shield ignores asteroid, enemy and enemy-bullet contact.
 
 ## Enemies
 - Server-simulated and snapshot-driven (`e` entries, math angle). Health 1, radius 15, 500 points.

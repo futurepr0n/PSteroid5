@@ -7,6 +7,7 @@ pilots share high scores, ships and the online world.
 - Single player arcade action
 - MULTIPLAYER: two-player co-op rooms over a 10-round campaign
 - MMO: drop into the shared online world with browser players at any time
+- Power-ups in every mode: extra life, rapid fire, spray and shield
 - Hangar: fly any ship from the public gallery, or load your own by passphrase
 - Ship editor: build and save custom ships with the controller (touchpad drag supported)
 - Online high scores
