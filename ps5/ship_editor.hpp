@@ -4,6 +4,7 @@
 // Every edit goes through apply(), which refuses anything the server would reject, so the
 // editor cannot produce an invalid ship. Portable and host-tested.
 #include "json_lite.hpp"
+#include "sound.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -28,6 +29,7 @@ struct Ship {
     std::string name = "PS5 Ship", color = "white";
     std::vector<Line> lines;
     std::vector<Pt> thrusters, weapons;
+    std::string shotSound = "pew"; // the player's own shots (pew, zap, laser, arcade)
 };
 
 enum class Ownership { fresh, owned, copy }; // copy: from the gallery, saved without its passphrase
@@ -247,6 +249,7 @@ inline std::string post_body(const Ship &s, const std::string &passphrase, bool 
         for (const auto &p : *pts) { json::Value o = json::Value::object(); o.set("x", num(p.x)); o.set("y", num(p.y)); arr.items.push_back(std::move(o)); }
         v.set(key, std::move(arr));
     }
+    v.set("shotSound", json::Value::string_value(s.shotSound));
     v.set("isPublic", json::Value::bool_value(isPublic));
     if (!passphrase.empty()) v.set("passphrase", json::Value::string_value(passphrase));
     return json::dump(v);
@@ -258,6 +261,7 @@ inline bool from_server(const json::Value &v, Ship &out) {
     Ship s;
     s.name = v.str("name", "Ship").substr(0, max_name);
     s.color = v.str("color", "white").substr(0, max_name);
+    s.shotSound = sound::valid_shot(v.str("shotSound"));
     auto arr = [&](const char *key, json::Value &scratch) -> const json::Value * {
         const json::Value *a = v.get(key);
         if (a && a->type == json::Value::Type::string && json::parse(a->s, scratch)) a = &scratch;

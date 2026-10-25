@@ -50,6 +50,17 @@ else
     echo "Windows Node or ../CSSTeroids-2 missing: ship evidence not judged"
 fi
 
+# Sound: mixer tests, then every effect compared sample by sample with the browser's own
+# public/js/core/sound.js (tools/sound-evidence.js).
+g++ -std=c++20 -O2 -Wall -Wextra -pedantic -pthread "$repo/ps5/test_sound.cpp" -o "$app/test-sound"
+"$app/test-sound" "$app/sound_samples.json"
+if [[ -x "/mnt/c/Program Files/nodejs/node.exe" && -d $repo/../CSSTeroids-2 ]]; then
+    "/mnt/c/Program Files/nodejs/node.exe" "$(wslpath -w "$repo/tools/sound-evidence.js")" "$(wslpath -w "$app/sound_samples.json")" > "$app/sound-evidence.json"
+    tr -d '' < "$app/sound-evidence.json" | grep -m1 worstDifference
+else
+    echo "Windows Node or ../CSSTeroids-2 missing: sound evidence not judged"
+fi
+
 # Multiplayer: WebSocket/socket.io client and the shared-world model. Golden vectors come from
 # the real world-sim.js (tools/gen-world-vectors.js). The live parts run against a socket.io
 # fixture and the REAL CSSteroids-2 world engine (tools/sio-fixture), using Windows Node from WSL.

@@ -269,6 +269,8 @@ struct RemotePlayer {
 };
 struct Enemy { std::string id; double x = 0, y = 0, a = 0; bool outOfView = false; };
 struct Burst { double x, y, age = 0; bool big; };
+// Moments the game plays a sound for; `mine` marks the player's own (always heard, full volume).
+struct SoundCue { enum Kind { shot, explosion, asteroid, boundary } kind; double x = 0, y = 0; int size = 0; bool mine = false; };
 
 enum class Phase { idle, joining, warping, playing, failed };
 
@@ -289,6 +291,8 @@ public:
     std::map<std::string, Enemy> enemies;
     std::vector<Bullet> bullets;      // own, remote replays and enemy rounds
     std::vector<Burst> bursts;
+    std::vector<SoundCue> cues;       // drained by the game each frame
+    bool touchingWall = false;
     std::vector<ScoreEntry> scores;
     SnapshotBuffer playerBuf{100, 1}, enemyBuf{100, 2};
     std::vector<Outgoing> outbox;
@@ -337,7 +341,14 @@ public:
         else if (name == "mmo-enemy-spawn") {
             if (d.is_array() && d.items.size() >= 3) { Enemy e; e.id = id_of(d.items[0]); e.x = d.items[1].n; e.y = d.items[2].n; enemies[e.id] = e; }
         } else if (name == "mmo-enemy-destroyed") {
-            if (d.is_array() && !d.items.empty()) { const auto id = id_of(d.items[0]); if (auto it = enemies.find(id); it != enemies.end()) bursts.push_back({it->second.x, it->second.y, 0, true}); enemies.erase(id); enemyBuf.remove(id); }
+            if (d.is_array() && !d.items.empty()) {
+                const auto id = id_of(d.items[0]);
+                if (auto it = enemies.find(id); it != enemies.end()) {
+                    bursts.push_back({it->second.x, it->second.y, 0, true});
+                    if (!it->second.outOfView) cues.push_back({SoundCue::explosion, it->second.x, it->second.y});
+                }
+                enemies.erase(id); enemyBuf.remove(id);
+            }
         } else if (name == "mmo-enemy-shoot") {
             auto shots = create_shot_bullets(d.num("x"), d.num("y"), d.num("angle") + tau / 4, 0, 0, {});
             for (auto &b : shots) { b.hostile = true; b.owner = id_of_field(d, "enemyId"); bullets.push_back(b); }
@@ -359,6 +370,8 @@ public:
         else if (name == "mmo-player-died") {
             const std::string who = d.str("playerId");
             bursts.push_back({d.num("x"), d.num("y"), 0, true});
+            if (who != myId) cues.push_back({SoundCue::explosion, d.num("x"), d.num("y")});
+            else if (!dead) cues.push_back({SoundCue::explosion, x, y, 0, true}); // the server saw it first
             if (who == myId) { dead = true; respawnCountdownMs = 3000; thrusting = false; }
             else if (auto it = players.find(who); it != players.end()) it->second.dead = true;
         } else if (name == "mmo-respawn") {
@@ -540,6 +553,7 @@ private:
         advance_to(parent, tick, bounds);
         asteroids.erase(it);
         bursts.push_back({parent.x, parent.y, 0, parent.size >= 2});
+        if (parent.hiddenUntilMs == 0) cues.push_back({SoundCue::asteroid, parent.x, parent.y, parent.size}); // ours was heard on the hit
         for (auto &c : split_asteroid(parent, tick)) asteroids[c.id] = c;
         // our kill that we did not predict: retire our closest round, as the browser does
         if (killer == myIdx && parent.hiddenUntilMs == 0) {
@@ -581,8 +595,12 @@ private:
                 if (std::fabs(vx) < 0.01) vx = 0;
                 if (std::fabs(vy) < 0.01) vy = 0;
             }
-            x = std::clamp(x + vx, ship_radius, bounds.width - ship_radius);
-            y = std::clamp(y + vy, ship_radius, bounds.height - ship_radius);
+            const double nx = x + vx, ny = y + vy;
+            x = std::clamp(nx, ship_radius, bounds.width - ship_radius);
+            y = std::clamp(ny, ship_radius, bounds.height - ship_radius);
+            const bool wall = x != nx || y != ny;
+            if (wall && !touchingWall && phase == Phase::playing) cues.push_back({SoundCue::boundary, x, y, 0, true});
+            touchingWall = wall;
             if (shootCooldown > 0) shootCooldown -= dt;
             if (phase == Phase::playing && in.fire && shootCooldown <= 0) {
                 shootCooldown = 0.25;
@@ -593,6 +611,7 @@ private:
                 s.set("vx", json::Value::number_value(vx)); s.set("vy", json::Value::number_value(vy));
                 s.set("tick", json::Value::number_value(std::floor(server_tick(nowMs))));
                 emit("mmo-shoot", std::move(s)); shotsSent++;
+                cues.push_back({SoundCue::shot, x, y, 0, true});
             }
         }
         for (auto &b : bullets) step_bullet_frame(b, dt);
@@ -606,7 +625,10 @@ private:
             bool hit = false;
             for (auto &[id, a] : asteroids) {
                 if (!asteroid_visible(a) || std::hypot(b.x - a.x, b.y - a.y) >= 3 + a.radius) continue;
-                if (b.owner.empty()) a.hiddenUntilMs = nowMs + 300 + (clockKnown ? rttMs : 700);
+                if (b.owner.empty()) {
+                    a.hiddenUntilMs = nowMs + 300 + (clockKnown ? rttMs : 700);
+                    cues.push_back({SoundCue::asteroid, a.x, a.y, a.size, true});
+                }
                 hit = true; break;
             }
             if (!hit) for (auto &[id, e] : enemies) if (!e.outOfView && std::hypot(b.x - e.x, b.y - e.y) < 3 + 15) { hit = true; break; }
@@ -620,6 +642,7 @@ private:
             r.set("x", json::Value::number_value(std::round(x))); r.set("y", json::Value::number_value(std::round(y)));
             if (collision) emit("mmo-ship-collision", r);
             emit("mmo-player-died", std::move(r));
+            cues.push_back({SoundCue::explosion, x, y, 0, true});
             dead = true; thrusting = false; respawnCountdownMs = 3000;
         };
         auto touches = [&](double cx, double cy, double r) { return ship_hits_circle(design.geometry, x, y, angle, cx, cy, r, ship_radius); };

@@ -1,0 +1,5 @@
+thrust_loop.wav: a 2 s loop cut from thrusterFire_002.ogg in "Sci-Fi Sounds" by Kenney (www.kenney.nl),
+Creative Commons Zero (CC0): https://creativecommons.org/publicdomain/zero/1.0/
+
+All other game sounds are synthesized at run time by ps5/sound.hpp (the same recipes as
+CSSteroids-2's public/js/core/sound.js).

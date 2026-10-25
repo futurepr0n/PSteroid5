@@ -109,6 +109,7 @@ public:
     std::vector<Bullet> bullets;
     std::vector<Debris> debris;
     std::vector<Event> events; // cleared by the caller each rendered frame
+    std::vector<int> brokenSizes; // size of each asteroid_hit, in order; cleared with events
     int score = 0, lives = 3, level = 1;
     bool over = false;
     float levelBanner = 0, time = 0;
@@ -117,7 +118,7 @@ public:
 
     void reset() {
         ship = Ship{};
-        bullets.clear(); debris.clear(); events.clear();
+        bullets.clear(); debris.clear(); events.clear(); brokenSizes.clear();
         score = 0; lives = 3; level = 1; over = false; time = 0;
         levelBanner = 2;
         spawn_level();
@@ -259,6 +260,7 @@ private:
         asteroids.erase(asteroids.begin() + long(index));
         if (a.size > 1) for (int i = 0; i < 2; i++) asteroids.push_back(make_asteroid(a.x, a.y, a.size - 1));
         events.push_back(Event::asteroid_hit);
+        brokenSizes.push_back(a.size);
     }
 
     void collide() {

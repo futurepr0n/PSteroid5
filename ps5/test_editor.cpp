@@ -63,6 +63,10 @@ int main() {
         CHECK(v.str("passphrase") == "swift-hawk-diving" && v.str("type") == "custom" && v.get("isPublic")->b);
         CHECK(v.get("customLines")->items[0].num("startY") == -50 && v.get("customLines")->items[0].str("color") == "#ff0000");
         CHECK(v.get("weaponPoints")->items.size() == 1);
+        CHECK(v.str("shotSound") == "pew");          // the default for every ship
+        ed.ship.shotSound = "laser";
+        json::Value l; CHECK(json::parse(post_body(ed.ship, {}, true), l) && l.str("shotSound") == "laser");
+        Ship back; CHECK(from_server(l, back) && back.shotSound == "laser");
         json::Value w; CHECK(json::parse(post_body(ed.ship, {}, false), w) && !w.get("passphrase") && !w.get("isPublic")->b);
         Editor empty; empty.set_name("");
         CHECK(empty.save_problem() == "a name is required");
@@ -71,7 +75,7 @@ int main() {
     {   // loading a server ship is exact (fractional browser coordinates, custom hex, string columns)
         json::Value v;
         CHECK(json::parse(R"({"name":"two","type":"custom","color":"magenta","customLines":"[{\"startX\":-55.5,\"startY\":-34.59375,\"endX\":-69.5,\"endY\":-35.59375,\"color\":\"#ca3f3f\"}]","thrusterPoints":[{"x":-12.5,"y":101}],"weaponPoints":null})", v));
-        Ship s; CHECK(from_server(v, s));
+        Ship s; CHECK(from_server(v, s) && s.shotSound == "pew"); // ships saved before shot sounds
         CHECK(s.lines.size() == 1 && s.lines[0].a.y == -34.59375 && s.lines[0].color == "#ca3f3f" && s.thrusters[0].x == -12.5 && s.weapons.empty());
         json::Value back; CHECK(json::parse(post_body(s, {}), back) && back.get("customLines")->items[0].num("endY") == -35.59375);
     }

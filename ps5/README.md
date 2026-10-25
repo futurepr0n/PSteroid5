@@ -37,6 +37,8 @@ Plan: `../docs/plans/2026-10-23-ps5-native-port.md`.
 | Screen | Input | Action |
 | --- | --- | --- |
 | Title | D-pad up/down, CROSS | Play / Hangar / Pilot name / Refresh scores |
+| Title: SOUND | D-pad left/right | Effects volume 0 (off) to 10, saved on the console |
+| Ship editor menu: WEAPON SOUND | CROSS | Next shot sound (pew, zap, laser, arcade), saved with the ship |
 | Game | Left stick / D-pad left-right | Turn |
 | Game | R2, D-pad up or stick up | Thrust |
 | Game | CROSS, R1 or SQUARE | Fire |
@@ -46,6 +48,14 @@ Plan: `../docs/plans/2026-10-23-ps5-native-port.md`.
 | Hangar | SQUARE | Switch gallery ↔ passphrase wheels (left/right word, up/down change, CROSS load) |
 | Pilot name | D-pad, CROSS, SQUARE, OPTIONS | Pick, add, delete, save |
 | Any | Hold OPTIONS 1.25 s | Exit (not on the name screen) |
+
+## Sound
+The same effects as the browser game (CSSteroids-2 `public/js/core/sound.js`), synthesized in
+`ps5/sound.hpp` from the same recipes; the build compares every sample with the browser's
+(`tools/sound-evidence.js`). Your own thrusters loop while thrusting (Kenney `thrusterFire_002`,
+CC0, see `ps5/sounds/CREDITS.txt`), your own shots play your ship's weapon sound, ship explosions
+pick one of two explosions at random, asteroid breaks follow size, and reaching the MMO or co-op
+world boundary beats. Other pilots' explosions and asteroid breaks play quieter, near you only.
 
 ## Server connection
 

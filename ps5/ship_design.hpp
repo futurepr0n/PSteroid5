@@ -4,6 +4,7 @@
 // customLines / thrusterPoints / weaponPoints. The browser draws them at 0.25 scale.
 #include "asteroids_core.hpp"
 #include "json_lite.hpp"
+#include "sound.hpp"
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -39,6 +40,7 @@ inline uint32_t css_color(std::string text, uint32_t fallback = 0xffffff) {
 
 struct ShipDesign {
     std::string name = "Default", passphrase, typeName = "default", colorName = "white";
+    std::string shotSound = sound::default_shot; // Ships.shotSound: what the player's own shots sound like
     ShipGeometry geometry;
     std::string source; // the server JSON it came from (saved for offline reload)
     bool fromServer() const { return !passphrase.empty(); }
@@ -68,6 +70,7 @@ inline bool parse_ship(const json::Value &v, ShipDesign &out) {
     d.passphrase = v.str("passphrase").substr(0, 64);
     d.typeName = v.str("type", "default");
     d.colorName = v.str("color", "white");
+    d.shotSound = sound::valid_shot(v.str("shotSound"));
     auto &g = d.geometry;
     g.color = css_color(d.colorName);
     g.shape = d.typeName == "triangle" ? ShipShape::triangle : d.typeName == "diamond" ? ShipShape::diamond

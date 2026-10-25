@@ -6,14 +6,14 @@
 namespace {
 // MULTIPLAYER = two-pilot campaign rooms (co-op); MMO = the drop-in shared world.
 enum class Screen { title, hangar, name, game, lobby, multiplayer, editor };
-const char *const menu_items[] = {"PLAY", "MULTIPLAYER", "MMO", "HANGAR", "SHIP EDITOR", "PILOT NAME", "REFRESH SCORES"};
-constexpr int menu_count = 7;
+const char *const menu_items[] = {"PLAY", "MULTIPLAYER", "MMO", "HANGAR", "SHIP EDITOR", "PILOT NAME", "SOUND", "REFRESH SCORES"};
+constexpr int menu_count = 8, menu_sound = 6;
 // Ship editor (docs/ship-design-space.md): tools, its OPTIONS menu, canvas placement.
 enum class Tool { line, move, erase, paint, thruster, weapon };
 const char *const tool_names[] = {"LINE", "MOVE", "ERASE", "PAINT", "THRUSTER", "WEAPON"};
 constexpr int tool_count = 6;
-const char *const editor_menu[] = {"SAVE", "SAVE AS NEW SHIP", "TEST FLIGHT", "RENAME SHIP", "CUSTOM COLOUR", "PUBLIC IN GALLERY", "CLEAR ALL", "EXIT EDITOR"};
-constexpr int editor_menu_count = 8;
+const char *const editor_menu[] = {"SAVE", "SAVE AS NEW SHIP", "TEST FLIGHT", "RENAME SHIP", "CUSTOM COLOUR", "PUBLIC IN GALLERY", "WEAPON SOUND", "CLEAR ALL", "EXIT EDITOR"};
+constexpr int editor_menu_count = 9, editor_menu_sound = 6;
 constexpr float canvas_left = 110, canvas_top = 150, canvas_px = 860; // 400 design units square
 constexpr float canvas_scale = canvas_px / 400;
 enum class LobbyStep { menu, list, code, waiting };
@@ -67,6 +67,10 @@ class VulkanExample : public ps5ui::KitExample {
     bool hangarPassphrase = false, paused = false, savedRun = false, submitted = false;
     std::string nameDraft;
     float accumulator = 0, exitHold = 0, previewSpin = 0;
+    // sound: retro effects and the thruster loop (sound.hpp, the same recipes as the browser)
+    cssteroids::sound::Mixer sfx{cssteroids::sound::thrust_loop_pcm, cssteroids::sound::thrust_loop_frames};
+    int soundLevel = 8;
+    static void fillAudio(int16_t *frames, int count, void *user) { static_cast<cssteroids::sound::Mixer *>(user)->fill(frames, count); }
 
     // --- text helpers -------------------------------------------------------
     void text(const std::string &s, float x, float y, float size, uint32_t color = 0xffffff, float alpha = 1) {
@@ -86,6 +90,38 @@ class VulkanExample : public ps5ui::KitExample {
             for (char c : line) if (name_chars.find(char(std::toupper((unsigned char)c))) != std::string::npos || (c >= 'a' && c <= 'z')) clean += c;
             if (!clean.empty()) pilot = clean.substr(0, name_max);
         }
+    }
+    void loadSound() {
+        std::ifstream file("/data/cssteroids-ps5/sound.txt");
+        if (int level; file >> level) soundLevel = std::clamp(level, 0, 10);
+        sfx.set_volume(soundLevel / 10.f);
+    }
+    void saveSound() {
+        mkdir("/data/cssteroids-ps5", 0777);
+        std::ofstream("/data/cssteroids-ps5/sound.txt", std::ios::trunc) << soundLevel << "\n";
+    }
+    void setSoundLevel(int level) {
+        soundLevel = std::clamp(level, 0, 10);
+        sfx.set_volume(soundLevel / 10.f);
+        saveSound();
+        sfx.shot(ship.shotSound); // a sample at the new volume
+    }
+    // Sounds from the MMO / co-op world: the player's own at full volume, the rest quieter and
+    // only near enough to be on screen
+    void playCues() {
+        for (const auto &c : mp.cues) {
+            using Cue = cssteroids::mmo::SoundCue;
+            const bool near = std::fabs(c.x - mp.x) < 1060 && std::fabs(c.y - mp.y) < 640;
+            if (!c.mine && !near) continue;
+            const float gain = c.mine ? 1.f : .6f;
+            switch (c.kind) {
+                case Cue::shot: sfx.shot(ship.shotSound); break;
+                case Cue::explosion: sfx.explosion(gain); break;
+                case Cue::asteroid: sfx.asteroid_break(c.size, gain); break;
+                case Cue::boundary: sfx.boundary(wall_ms() / 1000); break;
+            }
+        }
+        mp.cues.clear();
     }
     void savePilot() {
         mkdir("/data/cssteroids-ps5", 0777);
@@ -196,13 +232,15 @@ class VulkanExample : public ps5ui::KitExample {
         centered("a CSSteroids port for PS5", 240, 28, 0x9fb3c8);
         for (int i = 0; i < menu_count; i++) {
             const bool on = i == menu;
-            if (on) scene.rounded_rect({760, 285.f + i * 40 - 30, 400, 38}, 8, hui::gfx::Color::rgb(0x2a4a6a, .8f));
-            centered(menu_items[i], 285.f + i * 40, 26, on ? 0xffffff : 0x9fb3c8);
+            std::string label = menu_items[i];
+            if (i == menu_sound) label += soundLevel ? ": " + std::to_string(soundLevel) : ": OFF";
+            if (on) scene.rounded_rect({760, 285.f + i * 36 - 30, 400, 36}, 8, hui::gfx::Color::rgb(0x2a4a6a, .8f));
+            centered(label, 285.f + i * 36, 26, on ? 0xffffff : 0x9fb3c8);
         }
         char line[128];
         std::snprintf(line, sizeof line, "PILOT %s     SHIP %s     LOCAL BEST %d", pilot.c_str(), ship.name.c_str(), scores.best);
-        centered(line, 560, 24, 0x70e8a0);
-        drawShip(ship.geometry, 960, 640, previewSpin, 2.5f, false);
+        centered(line, 580, 24, 0x70e8a0);
+        drawShip(ship.geometry, 960, 665, previewSpin, 2.5f, false);
         centered("SERVER HIGH SCORES", 760, 26, 0xffd700);
         if (board.empty()) centered(scoreFetch.pending() ? "..." : "No scores to show", 800, 22, 0x9fb3c8);
         for (size_t i = 0; i < board.size() && i < 5; i++) {
@@ -210,7 +248,8 @@ class VulkanExample : public ps5ui::KitExample {
             centered(line, 800 + i * 32.f, 24, i == 0 ? 0xffffff : 0xc8d2dc);
         }
         centered(onlineStatus, 1000, 22, server.valid() ? 0x83bed4 : 0xf0c07d);
-        centered("UP/DOWN  Select     CROSS  Confirm     Hold OPTIONS  Exit", 1045, 20, 0x8293ab);
+        centered(menu == menu_sound ? "LEFT/RIGHT  Volume     CROSS  Next level     Hold OPTIONS  Exit"
+                                    : "UP/DOWN  Select     CROSS  Confirm     Hold OPTIONS  Exit", 1045, 20, 0x8293ab);
     }
     void drawHangar() {
         using hui::gfx::Color;
@@ -723,7 +762,16 @@ class VulkanExample : public ps5ui::KitExample {
                 case 3: screen = Screen::name; nameForShip = true; nameDraft = ed.ship.name; nameCursor = 0; break;
                 case 4: colorOpen = true; break;
                 case 5: isPublic = !isPublic; edStatus = isPublic ? "Saved ships appear in the public gallery" : "Saved ships stay private (load them by passphrase)"; break;
-                case 6: ed.clear(); break;
+                case editor_menu_sound: {
+                    using cssteroids::sound::shot_sounds;
+                    const auto it = std::find(shot_sounds.begin(), shot_sounds.end(), cssteroids::sound::valid_shot(ed.ship.shotSound));
+                    ed.ship.shotSound = shot_sounds[size_t((it - shot_sounds.begin() + 1) % long(shot_sounds.size()))];
+                    ed.revision++;
+                    sfx.shot(ed.ship.shotSound);
+                    menuOpen = true; // stay on the item to hear the next one
+                    break;
+                }
+                case 7: ed.clear(); break;
                 default: screen = Screen::title; game.geometry = ship.geometry; break;
             }
             return;
@@ -848,6 +896,10 @@ class VulkanExample : public ps5ui::KitExample {
                 std::string label = editor_menu[i];
                 if (i == 0) label = ed.ownership == Ownership::owned ? "SAVE (update " + ed.passphrase + ")" : "SAVE (new ship)";
                 if (i == 5) label += isPublic ? ": YES" : ": NO";
+                if (i == editor_menu_sound) {
+                    label += ": " + cssteroids::sound::valid_shot(ed.ship.shotSound);
+                    for (auto &c : label) c = char(std::toupper((unsigned char)c));
+                }
                 if (i == menuIndex) scene.rounded_rect({640, 270 + i * 52.f - 34, 640, 46}, 8, Color::rgb(0x2a4a6a));
                 centered(label, 270 + i * 52.f, 26, i == menuIndex ? 0xffffff : 0x9fb3c8);
             }
@@ -876,6 +928,12 @@ class VulkanExample : public ps5ui::KitExample {
     void titleInput(uint32_t pressed) {
         if (pressed & PAD_UP) menu = (menu + menu_count - 1) % menu_count;
         if (pressed & PAD_DOWN) menu = (menu + 1) % menu_count;
+        if (menu == menu_sound) {
+            if (pressed & PAD_LEFT) setSoundLevel(soundLevel - 1);
+            if (pressed & PAD_RIGHT) setSoundLevel(soundLevel + 1);
+            if (pressed & PAD_CROSS) setSoundLevel(soundLevel == 10 ? 0 : soundLevel + 1);
+            return;
+        }
         if (!(pressed & PAD_CROSS)) return;
         switch (menu) {
             case 0: startGame(); break;
@@ -940,6 +998,7 @@ class VulkanExample : public ps5ui::KitExample {
     }
 
 public:
+    ~VulkanExample() { audio_stop(); }
     VulkanExample() {
         title = "PSteroid5"; name = "cssteroids";
         settings.overlay = false; ps5.ownOverlay = true;
@@ -951,6 +1010,8 @@ public:
         scores.init("/data/cssteroids-ps5/highscore.txt", "/app0/cssteroids-highscore.txt");
         loadPilot();
         loadOwned();
+        loadSound();
+        if (!audio_start(&VulkanExample::fillAudio, &sfx)) say("PSteroid5: no audio output");
         if (cssteroids::ShipDesign saved; shipStore.load(saved)) useShip(saved, false);
         server = cssteroids::net::load_endpoint({"/data/cssteroids-ps5/server.txt", "/app0/server.txt"});
         requestScores();
@@ -992,11 +1053,22 @@ public:
             in.fire = (pad.held & (PAD_CROSS | PAD_R1 | PAD_SQUARE)) != 0;
         }
         if (screen == Screen::multiplayer || screen == Screen::lobby) pumpMultiplayer(intercepted || screen == Screen::lobby ? cssteroids::Controls{} : in, dt);
+        playCues();
         if (screen == Screen::game && !paused && !intercepted) {
             accumulator = std::min(accumulator + dt, 6 * cssteroids::step_seconds);
             while (accumulator >= cssteroids::step_seconds) { game.step(in); accumulator -= cssteroids::step_seconds; }
         } else game.time += dt; // keeps menu animations moving
-        game.events.clear();
+        size_t broken = 0;
+        for (const auto e : game.events) {
+            using cssteroids::Event;
+            if (e == Event::shot) sfx.shot(testFlight ? ed.ship.shotSound : ship.shotSound);
+            else if (e == Event::ship_hit) sfx.explosion();
+            else if (e == Event::asteroid_hit && broken < game.brokenSizes.size()) sfx.asteroid_break(game.brokenSizes[broken++]);
+        }
+        game.events.clear(); game.brokenSizes.clear();
+        // the player's own thrusters, while the ship is flying
+        sfx.set_thrust(!intercepted && ((screen == Screen::game && !paused && !game.over && game.ship.thrusting && !game.ship.exploding) ||
+                                        (screen == Screen::multiplayer && mp.phase == cssteroids::mmo::Phase::playing && mp.thrusting && !mp.dead)));
         if (game.over && !savedRun) { if (!testFlight) scores.record(game.score); savedRun = true; } // test flights do not count
 
         scene.clear();
