@@ -112,5 +112,26 @@ int main(int argc,char **argv){
         auto c=pat::centre_of({{0,0},{10,4},{2,-6}});assert(c.x==5 && c.y==-1);
         assert(pat::centre_of({}).x==0);
     }
-    std::cout<<"pattern regions, holes, fills, atomic limits, undo/refit, metadata, CSP1 and preview framing tests passed\n";
+    {   // Fine taps, delayed hold movement, reversal, bounds and frame-rate independence.
+        pat::SmoothZoom zoom;assert(zoom.update(true,false,1./60) && std::fabs(zoom.value-1.01)<1e-12);
+        zoom.update(false,false,1./60);zoom.update(false,true,1./60);assert(std::fabs(zoom.value-1)<1e-12);
+        pat::SmoothZoom a,b;for(int i=0;i<60;++i)a.update(true,false,1./60);for(int i=0;i<30;++i)b.update(true,false,1./30);
+        assert(std::fabs(a.value-b.value)<1e-12 && a.value>1.2 && a.value<1.4);
+        const double held=a.value;a.release();a.update(false,false,.1);assert(a.value==held);
+        a.update(false,true,0);assert(std::fabs(a.value-(held-.01))<1e-12);
+        for(int i=0;i<200;++i)a.update(false,true,.1);
+        assert(a.value==.25 && a.slider()==0);
+        for(int i=0;i<200;++i)a.update(true,false,.1);
+        assert(a.value==4 && a.slider()==1);
+        const double maximum=a.value;a.update(true,true,.1);assert(a.value==maximum && a.direction==0);
+        auto fit=pat::fit_view({{{-200,-200},{200,200}}},800,1,{},0);
+        auto smaller=pat::fit_view({{{-200,-200},{200,200}}},800,.5,{},0);assert(std::fabs(smaller.scale-fit.scale*.5)<1e-12);
+    }
+    {   // Replacing a hull drops old fills, and undo restores the complete recipe/artwork.
+        Editor replacement(square());assert(replacement.apply_fill({0,0},pat::preset("grid"),5));
+        const auto before=post_body(replacement.ship,{},false);
+        assert(replacement.choose_hull(Hull::delta) && replacement.ship.fills.empty());
+        assert(replacement.undo() && post_body(replacement.ship,{},false)==before);
+    }
+    std::cout<<"pattern regions, holes, fills, atomic limits, undo/refit, metadata, CSP1, preview framing, smooth zoom and hull replacement tests passed\n";
 }

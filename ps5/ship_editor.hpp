@@ -31,6 +31,31 @@ struct Ship {
     std::vector<pattern::Fill> fills{};
 };
 
+enum class Hull { classic, triangle, diamond, meridian, manta, delta, blank };
+inline constexpr std::array<const char *,7> hull_names={"CLASSIC","TRIANGLE","DIAMOND","MERIDIAN","MANTA","DELTA","BLANK"};
+// Browser sample() outlines/cockpits, uniformly fitted inside the editable square.
+inline Ship starter_hull(Hull kind) {
+    Ship s;std::vector<Pt> outline,cockpit;
+    switch(kind) {
+        case Hull::classic: outline={{0,-60},{-42,42},{42,42}};s.name="Classic";break;
+        case Hull::triangle: outline={{0,-60},{-60,60},{60,60}};s.name="Triangle";break;
+        case Hull::diamond: outline={{0,-60},{60,0},{0,60},{-60,0}};s.name="Diamond";break;
+        case Hull::meridian: outline={{0,-250},{45,-90},{90,-20},{220,140},{210,170},{70,100},{42,210},{0,175},{-42,210},{-70,100},{-210,170},{-220,140},{-90,-20},{-45,-90}};s.name="Meridian study";break;
+        case Hull::manta: outline={{0,-180},{60,-100},{150,-70},{250,30},{260,140},{170,80},{65,130},{0,220},{-65,130},{-170,80},{-260,140},{-250,30},{-150,-70},{-60,-100}};s.name="Manta study";break;
+        case Hull::delta: outline={{0,-250},{240,200},{80,155},{0,205},{-80,155},{-240,200}};s.name="Delta study";break;
+        case Hull::blank: s.name="Untitled ship";break;
+    }
+    s.color="#e5edf2";
+    if(kind==Hull::meridian || kind==Hull::manta || kind==Hull::delta)cockpit={{0,-150},{20,-60},{15,40},{0,65},{-15,40},{-20,-60}};
+    for(const auto *points:{&outline,&cockpit})for(size_t i=0;i<points->size();++i){
+        Line l{(*points)[i],(*points)[(i+1)%points->size()],s.color};
+        l.id="hull-"+std::to_string(int(kind))+"-"+std::to_string(s.lines.size());s.lines.push_back(std::move(l));
+    }
+    double extent=0;for(const auto &l:s.lines)for(auto p:{l.a,l.b})extent=std::max({extent,std::fabs(p.x),std::fabs(p.y)});
+    if(extent>half){const double k=180/extent;for(auto &l:s.lines){l.a.x*=k;l.a.y*=k;l.b.x*=k;l.b.y*=k;}}
+    return s;
+}
+
 inline std::string post_body(const Ship &,const std::string &,bool);
 
 enum class Ownership { fresh, owned, copy }; // copy: from the gallery, saved without its passphrase
@@ -122,10 +147,18 @@ public:
 
     bool can_undo() const { return !undoStack.empty(); }
     bool can_redo() const { return !redoStack.empty(); }
-    bool undo() { if (undoStack.empty()) return false; redoStack.push_back(ship); ship = undoStack.back(); undoStack.pop_back(); revision++; return true; }
-    bool redo() { if (redoStack.empty()) return false; undoStack.push_back(ship); ship = redoStack.back(); redoStack.pop_back(); revision++; return true; }
+    bool undo() { if (undoStack.empty()) return false; redoStack.push_back(ship); ship = undoStack.back(); undoStack.pop_back(); legacyOutside=!within_canvas(ship); revision++; return true; }
+    bool redo() { if (redoStack.empty()) return false; undoStack.push_back(ship); ship = redoStack.back(); redoStack.pop_back(); legacyOutside=!within_canvas(ship); revision++; return true; }
     // What saving would be refused for (empty = ready to save).
     std::string save_problem() const { return invalid_reason(ship, !legacyOutside); }
+
+    bool choose_hull(Hull kind) {
+        Ship next=starter_hull(kind);next.shotSound=ship.shotSound;
+        const bool wasOutside=legacyOutside;
+        legacyOutside=!within_canvas(next);
+        if(commit(std::move(next)))return true;
+        legacyOutside=wasOutside;return false;
+    }
 
     // --- edits (each one undoable; false + message when refused) -------------
     // a == b makes a dot: the browser stores a click without a drag the same way (3% of

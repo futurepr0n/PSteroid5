@@ -1,13 +1,14 @@
 // Host tests for the ship editor model (ship_editor.hpp).
 #include "ship_editor.hpp"
 #include <cstdio>
+#include <fstream>
 
 using namespace cssteroids;
 using namespace cssteroids::editor;
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); failures++; } } while (0)
 
-int main() {
+int main(int argc,char **argv) {
     {   // mirror on by default: a line and its reflection; erase and paint act on both
         Editor ed;
         CHECK(ed.mirrorOn);
@@ -106,6 +107,22 @@ int main() {
         CHECK(ed.bend_line({20, -48}, {190, -190}));
         CHECK(inside(ed.ship.lines[0].control));
     }
+    {   // Starter hulls are editable, patternable closed outlines; choosing one is undoable.
+        Editor ed;ed.mirrorOn=false;ed.add_line({-10,-10},{10,10},"#ff00ff");
+        ed.toggle_point(true,{0,-10});ed.ship.shotSound="laser";
+        const auto before=post_body(ed.ship,{},false);
+        for(size_t i=0;i<hull_names.size();++i){
+            CHECK(ed.choose_hull(Hull(i)) && within_canvas(ed.ship));
+            CHECK(ed.ship.shotSound=="laser" && ed.ship.thrusters.empty() && ed.ship.weapons.empty() && ed.ship.fills.empty());
+            if(Hull(i)==Hull::blank)CHECK(ed.ship.lines.empty());
+            else {std::string error;CHECK(!pattern::regions(ed.ship.lines,error).empty() && error.empty());CHECK(ed.save_problem().empty());}
+            CHECK(ed.undo() && post_body(ed.ship,{},false)==before);
+            CHECK(ed.redo() && within_canvas(ed.ship));CHECK(ed.undo());
+        }
+        CHECK(starter_hull(Hull::classic).lines.size()==3 && starter_hull(Hull::diamond).lines.size()==4);
+        CHECK(starter_hull(Hull::meridian).lines.size()==20 && starter_hull(Hull::manta).lines.size()==20 && starter_hull(Hull::delta).lines.size()==12);
+    }
+    if(argc>1){json::Value hulls;hulls.type=json::Value::Type::array;for(size_t i=0;i<hull_names.size();++i){json::Value v;json::parse(post_body(starter_hull(Hull(i)),{},false),v);v.set("preset",json::Value::string_value(hull_names[i]));hulls.items.push_back(v);}std::ofstream(argv[1])<<json::dump(hulls);}
     if (failures) { std::printf("%d editor test failure(s)\n", failures); return 1; }
     std::puts("editor tests passed");
     return 0;

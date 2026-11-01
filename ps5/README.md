@@ -1,7 +1,7 @@
 # PSteroid5 — native PS5 port of CSSteroids
 
 Title **PPSA77305**, content ID `UP9000-PPSA77305_00-PSTEROID5PS50000`, version
-01.004.000. A native C++ folder title of the CSSteroids-2 browser game built with
+01.004.002. A native C++ folder title of the CSSteroids-2 browser game built with
 the workspace's PayloadSDK/Vulkan toolchain (see `../../PS5-PORTING-HANDBOOK.md`).
 Plan: `../docs/plans/2026-10-23-ps5-native-port.md`.
 
@@ -161,3 +161,28 @@ visibility is preserved on update; the visibility choice applies to new copies.
 This supersedes the 01.003.000 restriction that browser documents save as copies.
 The reference's cloud pattern library is test-database-only; this port uses a local
 library and CSP1 exchange without changing the server or its database.
+
+## 01.004.001: smooth ship-editor zoom and starting hulls
+
+In the main ship editor, tap D-pad UP/DOWN to change view zoom by one percentage
+point. Hold for a quarter second to adjust steadily at 35 percentage points per
+second. The visible slider and percentage cover 25?400%; 100% fits the editable
+square and any oversized loaded ship. This controls the editor view; saved ship
+geometry still changes through the existing SCALE DOWN/UP actions. Menus retain
+normal D-pad navigation, and the pattern step keeps its existing zoom controls.
+
+OPTIONS > SHIP TYPE / STARTING HULL opens a thumbnail selector: Classic, Triangle,
+Diamond, Meridian, Manta, Delta and Blank. Use the D-pad to browse, CROSS to choose,
+and CIRCLE to return. Merely browsing does not alter the document. Choosing replaces
+hull artwork, fills and hardpoints in one undo step; the weapon sound is retained.
+SQUARE restores the previous complete design. The three browser study hulls and
+cockpits are uniformly fitted into the PS5 drawing square so all endpoints remain
+editable. Selection resets view zoom to 100% and autosaves the completed edit to
+its local draft; online updates still require an explicit SAVE.
+
+## 01.004.002: vector launcher tile
+
+The icon uses hollow polygon asteroids, a multicolour outline ship and short rear
+trails against a starfield. Re-export it with ps5/Build-Icon.ps1 from the retained
+artwork/icon-vector-master.png. This packaging-only refresh keeps the validated
+01.004.001 game executable and runtime unchanged.

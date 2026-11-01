@@ -23,8 +23,8 @@ constexpr std::array<int, pattern_menu_count> pattern_menu_order = {0, 10, 13, 1
 constexpr std::array<int, 3> pattern_menu_groups = {5, 4, 5};
 const char *const pattern_menu_group_names[] = {"APPLY", "TILE", "LIBRARY AND SHARING"};
 constexpr int tool_count = 7;
-const char *const editor_menu[] = {"SAVE", "SAVE AS NEW SHIP", "TEST FLIGHT", "RENAME SHIP", "CUSTOM COLOUR", "PUBLIC IN GALLERY", "WEAPON SOUND", "RESTORE LOCAL DRAFT", "SCALE DOWN 90%", "SCALE UP 110%", "CLEAR ALL", "EXIT EDITOR"};
-constexpr int editor_menu_count = 12, editor_menu_sound = 6;
+const char *const editor_menu[] = {"SAVE", "SAVE AS NEW SHIP", "TEST FLIGHT", "RENAME SHIP", "CUSTOM COLOUR", "PUBLIC IN GALLERY", "WEAPON SOUND", "RESTORE LOCAL DRAFT", "SCALE DOWN 90%", "SCALE UP 110%", "CLEAR ALL", "EXIT EDITOR", "SHIP TYPE / STARTING HULL"};
+constexpr int editor_menu_count = 13, editor_menu_sound = 6;
 constexpr float canvas_left = 300, canvas_top = 170, canvas_px = 800; // 400 design units square
 constexpr float canvas_scale = canvas_px / 400;
 enum class LobbyStep { menu, list, code, waiting };
@@ -81,7 +81,8 @@ class VulkanExample : public ps5ui::KitExample {
     double patternScale=20, patternWidth=1, tileZoom=1;   // scale matches the browser: design units per tile unit, default 20
     int areaCount=0, areaRevision=-1;
     size_t shipZoomIndex=0;   // index into pattern::view_zooms; 0 fits the whole ship
-    size_t editorZoomIndex=0;
+    cssteroids::editor::pattern::SmoothZoom editorZoom;
+    bool hullOpen=false;int hullIndex=0;
     cssteroids::editor::pattern::View editorView{{0,0},canvas_scale};
     cssteroids::editor::Pt tilePan;
     bool patternR2=false,patternL2=false;
@@ -877,7 +878,7 @@ class VulkanExample : public ps5ui::KitExample {
         }
         if(restoreDraft && !draft) { edStatus="No local draft yet";return; }
         ed = Editor(start, own, pass);
-        patternOpen=patternMenu=false;patternRevision=0;nameForPattern=false;
+        patternOpen=patternMenu=hullOpen=false;patternRevision=0;nameForPattern=false;editorZoom.reset();
         edGeometryRevision=-1;draftRevision=ed.revision;savedRevision=-1;draftFailed=false;draftDelay=0;
         cursor = {0, 0}; pending = grabbing = menuOpen = colorOpen = false; tool = Tool::line;
         edStatus = own == Ownership::owned ? "Editing your ship: SAVE updates it (" + pass + ")"
@@ -910,7 +911,7 @@ class VulkanExample : public ps5ui::KitExample {
         auto framed = ed.ship.lines;
         framed.push_back({{-half, -half}, {half, half}});
         for (const auto *pts : {&ed.ship.thrusters, &ed.ship.weapons}) for (auto p : *pts) framed.push_back({p, p});
-        editorView = pattern::fit_view(framed, canvas_px, pattern::view_zooms[std::min(editorZoomIndex, pattern::view_zooms.size() - 1)], cursor, 0);
+        editorView = pattern::fit_view(framed, canvas_px, editorZoom.value, cursor, 0);
     }
     bool inCanvas(float x, float y) const { return x >= canvas_left && x <= canvas_left + canvas_px && y >= canvas_top && y <= canvas_top + canvas_px; }
     void canvasLine(float x1, float y1, float x2, float y2, float width, hui::gfx::Color color) {
@@ -1291,11 +1292,41 @@ class VulkanExample : public ps5ui::KitExample {
             say("PSteroid5 editor: saved \"%s\" as %s (%zu lines)", d.name.c_str(), d.passphrase.c_str(), ed.ship.lines.size());
         } else edStatus = "Save failed: " + describe(r);
     }
+    void hullInput(uint32_t pressed) {
+        using namespace cssteroids::editor;
+        const int count=int(hull_names.size());
+        if(pressed & PAD_LEFT)hullIndex=(hullIndex+count-1)%count;
+        if(pressed & PAD_RIGHT)hullIndex=(hullIndex+1)%count;
+        if(pressed & PAD_UP)hullIndex=std::max(0,hullIndex-3);
+        if(pressed & PAD_DOWN)hullIndex=std::min(count-1,hullIndex+3);
+        if(pressed & (PAD_CIRCLE|PAD_OPTIONS)){hullOpen=false;menuOpen=true;menuIndex=12;return;}
+        if(pressed & PAD_CROSS){
+            if(ed.choose_hull(Hull(hullIndex))){cursor={};pending=grabbing=touchDown=false;edGeometryRevision=-1;editorZoom.reset();hullOpen=menuOpen=false;lastTouchCount=0;edStatus=std::string(hull_names[size_t(hullIndex)])+" hull selected. SQUARE undoes the replacement";saveDraft();}
+            else edStatus=ed.message;
+        }
+    }
+    void drawHullPicker() {
+        using namespace cssteroids::editor;using hui::gfx::Color;
+        scene.rounded_rect({360,130,1200,845},12,Color::rgb(0x08111f,.98f));
+        centered("SHIP TYPE / STARTING HULL",190,32,0x00ffff);
+        centered("Choose an outline. Replaces the current design; SQUARE can undo.",229,20,0x9fb3c8);
+        for(size_t i=0;i<hull_names.size();++i){
+            const float x=410+float(i%3)*370,y=260+float(i/3)*210;
+            const bool selected=int(i)==hullIndex;
+            scene.bordered_rect({x,y,350,190},8,Color::rgb(selected?0x123348:0x091525),selected?3.f:1.f,Color::rgb(selected?0xf5e400:0x28465a));
+            auto sample=starter_hull(Hull(i));const auto view=pattern::fit_view(sample.lines,135);
+            for(const auto &l:sample.lines)scene.line(x+175+float((l.a.x-view.centre.x)*view.scale),y+78+float((l.a.y-view.centre.y)*view.scale),x+175+float((l.b.x-view.centre.x)*view.scale),y+78+float((l.b.y-view.centre.y)*view.scale),2,Color::rgb(0xe5edf2));
+            centered(hull_names[i],y+172,22,selected?0xf5e400:0x9fb3c8,x+175);
+            if(sample.lines.empty())centered("EMPTY CANVAS",y+90,18,0x6d8893,x+175);
+        }
+        centered("D-PAD Select    CROSS Use hull    CIRCLE Back",945,20,0x8293ab);
+    }
     void editorInput(const struct pad &pad, float dt) {
         using namespace cssteroids::editor;
         const uint32_t pressed = pad.pressed;
-        if(patternOpen){patternInput(pad,dt);return;}
-        if (colorOpen) { // custom colour: D-pad up/down channel, left/right value, CROSS use, CIRCLE back
+        if(patternOpen){editorZoom.release();patternInput(pad,dt);return;}
+        if(hullOpen){hullInput(pressed);return;}
+        if (colorOpen) { editorZoom.release(); // custom colour: D-pad up/down channel, left/right value, CROSS use, CIRCLE back
             unsigned rgb = unsigned(std::strtoul(customColor.c_str() + 1, nullptr, 16));
             int ch[3] = {int(rgb >> 16 & 255), int(rgb >> 8 & 255), int(rgb & 255)};
             if (pressed & PAD_UP) rgbChannel = (rgbChannel + 2) % 3;
@@ -1309,6 +1340,7 @@ class VulkanExample : public ps5ui::KitExample {
             return;
         }
         if (menuOpen) {
+            editorZoom.release();
             if (pressed & PAD_UP) menuIndex = (menuIndex + editor_menu_count - 1) % editor_menu_count;
             if (pressed & PAD_DOWN) menuIndex = (menuIndex + 1) % editor_menu_count;
             if (pressed & (PAD_CIRCLE | PAD_OPTIONS)) { menuOpen = false; return; }
@@ -1336,6 +1368,7 @@ class VulkanExample : public ps5ui::KitExample {
                 case 8: ed.scale_ship(.9); break;
                 case 9: ed.scale_ship(1.1); break;
                 case 10: ed.clear(); break;
+                case 12: hullOpen=true;pending=grabbing=touchDown=false;break;
                 default: saveDraft(); screen = Screen::title; game.geometry = ship.geometry; break;
             }
             return;
@@ -1347,9 +1380,8 @@ class VulkanExample : public ps5ui::KitExample {
         cursor.x += sx * std::fabs(sx) * speed * dt; cursor.y += sy * std::fabs(sy) * speed * dt;
         if (pressed & PAD_LEFT) cursor.x = snap(cursor, step).x - step;
         if (pressed & PAD_RIGHT) cursor.x = snap(cursor, step).x + step;
-        // D-pad up/down zooms the canvas around the cursor
-        if ((pressed & PAD_UP) && editorZoomIndex + 1 < pattern::view_zooms.size()) ++editorZoomIndex;
-        if ((pressed & PAD_DOWN) && editorZoomIndex > 0) --editorZoomIndex;
+        // Small taps and time-based hold movement, without resizing the saved ship.
+        editorZoom.update((pad.held & PAD_UP)!=0,(pad.held & PAD_DOWN)!=0,dt);
         if (pad.touch_count > 0) {
             if (!touchSeen) { touchSeen = true; say("PSteroid5 editor: touchpad active (first finger at %.0f,%.0f)", pad.touch_x, pad.touch_y); }
             if (lastTouchCount > 0 && pad.touch_id == lastTouchId) { // same finger: move by its travel
@@ -1399,9 +1431,9 @@ class VulkanExample : public ps5ui::KitExample {
         }
         if (ed.mirrorOn) canvasLine(toScreenX(0), canvas_top, toScreenX(0), canvas_top + canvas_px, 2, Color::rgb(0x70caff, .5f));
         text("FRONT", toScreenX(0) - 28, canvas_top - 10, 18, 0x8293ab);
-        const double zoom = pattern::view_zooms[std::min(editorZoomIndex, pattern::view_zooms.size() - 1)];
-        char zoomLabel[24]; std::snprintf(zoomLabel, sizeof zoomLabel, zoom > 1 ? "ZOOM %.0f%%" : "FIT", zoom * 100);
-        text(zoomLabel, canvas_left + canvas_px - 110, canvas_top - 10, 18, 0x6d8893);
+        const double zoom = editorZoom.value;
+        char zoomLabel[32];std::snprintf(zoomLabel,sizeof zoomLabel,"VIEW %.0f%%",zoom*100);
+        text(zoomLabel,canvas_left+canvas_px-125,canvas_top-10,18,0x9fb3c8);
         // the ship at design scale
         const int hot = (tool == Tool::erase || tool == Tool::paint) ? ed.nearest_line(cursor) : -1;
         for (size_t i = 0; i < ed.ship.lines.size(); i++) {
@@ -1483,11 +1515,17 @@ class VulkanExample : public ps5ui::KitExample {
         text(line,px+332,515,18,0x8293ab);
         for(const auto &w:cssteroids::ship_segments(g,px+480,620,0,detail))
             scene.line(float(w.x1),float(w.y1),float(w.x2),float(w.y2),w.width,Color::rgb(w.color));
-        text("MAGENTA  Rotation centre",px,768,20,0xff80ff);
-        text("STICK / TOUCHPAD  Cursor    D-PAD  Step / Zoom",px,810,20,0x8293ab);
-        text("CROSS  Place    SQUARE  Undo    TRIANGLE  Redo",px,844,20,0x8293ab);
-        text("R3  Mirror    L3  Fine grid    OPTIONS  Save / Test",px,878,20,0x8293ab);
-        text("Touchpad: hold press to drag a line or point",px,912,20,0x8293ab);
+        text("VIEW ZOOM",px,768,19,0x00ffff);
+        const float sliderLeft=px+150,sliderWidth=330,sliderY=760;
+        scene.rounded_rect({sliderLeft,sliderY,sliderWidth,6},3,Color::rgb(0x28465a));
+        if(editorZoom.slider()>0)scene.rounded_rect({sliderLeft,sliderY,sliderWidth*float(editorZoom.slider()),6},3,Color::rgb(0x00ffff));
+        const float thumb=sliderLeft+sliderWidth*float(editorZoom.slider());
+        scene.circle(thumb,sliderY+3,8,Color::rgb(0xf5e400));
+        text(zoomLabel,px+500,768,19,0xf5e400);
+        text("UP / DOWN  Tap to nudge, hold to zoom    25-400%",px,804,19,0x8293ab);
+        text("STICK / TOUCHPAD Cursor   LEFT / RIGHT Nudge",px,838,19,0x8293ab);
+        text("CROSS Place   SQUARE Undo   TRIANGLE Redo",px,872,19,0x8293ab);
+        text("R3 Mirror   L3 Fine   OPTIONS Hull / Save / Test",px,906,19,0x8293ab);
         text(ed.ship.lines.size()>2000?"Heavy design: online play sheds pattern lines first":ed.message,px,954,20,0xf0c07d);
         text(saveRequest.pending()?"SAVING TO SERVER...":draftFailed?"LOCAL DRAFT FAILED":draftRevision==ed.revision?"OPTIONS  Restore local draft":"LOCAL DRAFT PENDING",px,992,18,draftFailed?0xff4040:0x70e8a0);
         text(edStatus,60,1045,18,0x83bed4);
@@ -1520,6 +1558,7 @@ class VulkanExample : public ps5ui::KitExample {
             }
             centered("UP/DOWN channel  LEFT/RIGHT or stick adjust  CROSS use  CIRCLE back", 650, 16, 0x8293ab);
         }
+        if(hullOpen)drawHullPicker();
     }
 
     // --- input --------------------------------------------------------------
@@ -1642,7 +1681,7 @@ public:
             exitHold = (pad.held & PAD_OPTIONS) && screen != Screen::name && screen != Screen::editor && !(screen == Screen::lobby && lobbyStep == LobbyStep::code) ? exitHold + dt : 0;
             if (exitHold >= 1.25f) quit = true;
         }
-        if (intercepted) exitHold = 0;
+        if (intercepted) {exitHold=0;editorZoom.release();}
         cssteroids::Controls in;
         if (ps5.frameBudget) { in.turn = .35f; in.thrust = int(game.time) % 3 == 0; in.fire = true; }
         else if (!intercepted) {

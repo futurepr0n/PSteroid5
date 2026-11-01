@@ -193,6 +193,23 @@ inline bool decode(const std::string &code,Tile &out,std::string &error){
 
 // Live ship preview framing: zoom 1 fits the whole ship; larger zooms magnify around a focus without leaving the ship
 constexpr std::array<double,5> view_zooms={1,1.5,2,3,4};
+// Fine view control: a tap changes one percentage point; a hold glides after a
+// short delay. Time is integrated after the delay for consistent 30/60 Hz input.
+struct SmoothZoom {
+    static constexpr double minimum=.25,maximum=4,tap=.01,delay=.25,rate=.35;
+    double value=1,heldSeconds=0;int direction=0;
+    void reset(){value=1;heldSeconds=0;direction=0;}
+    void release(){heldSeconds=0;direction=0;}
+    bool update(bool up,bool down,double dt){
+        const double before=value;const int next=int(up)-int(down);
+        if(!next){release();return false;}
+        if(next!=direction){direction=next;heldSeconds=0;value+=direction*tap;}
+        const double old=heldSeconds;heldSeconds+=std::isfinite(dt)?std::clamp(dt,0.,.1):0;
+        value+=direction*rate*(std::max(0.,heldSeconds-delay)-std::max(0.,old-delay));
+        value=std::clamp(value,minimum,maximum);return value!=before;
+    }
+    double slider()const{return (value-minimum)/(maximum-minimum);}
+};
 struct View {Pt centre;double scale=1;};  // screen = view origin + (design point - centre) * scale
 inline bool bounds(const std::vector<Line> &lines,Pt &lo,Pt &hi){
     bool any=false;
@@ -207,7 +224,8 @@ inline View fit_view(const std::vector<Line> &lines,double px,double zoom=1,Pt f
     Pt lo,hi;if(px<=0 || !bounds(lines,lo,hi))return {{0,0},px>0?px/400:1};
     const double span=std::max({hi.x-lo.x,hi.y-lo.y,1.});
     View v{{(lo.x+hi.x)/2,(lo.y+hi.y)/2},px*(1-2*margin)/span};
-    if(!(zoom>1))return v;
+    if(!std::isfinite(zoom) || zoom<=0)zoom=1;
+    if(zoom==1)return v;
     v.scale*=zoom;const double half=px/2/v.scale;
     auto keep=[&](double f,double a,double b){return b-a<=2*half?(a+b)/2:std::clamp(f,a+half,b-half);};
     v.centre={keep(focus.x,lo.x,hi.x),keep(focus.y,lo.y,hi.y)};

@@ -6,7 +6,7 @@ Adapted from PSPGameCPP/ps5/prepare_build.py. Uses its own staging tree
 from pathlib import Path
 import json, shutil, subprocess, sys, hashlib
 
-PORT_REVISION = 'pattern-authoring-01.004.000-2026-10-31'
+PORT_REVISION = 'launcher-art-01.004.002'
 HEADERS = ['powerups.hpp', 'asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp', 'socketio.hpp', 'mmo_world.hpp', 'coop_lobby.hpp', 'ship_render.hpp', 'space_effects.hpp', 'sound.hpp', 'editor_geometry.hpp', 'pattern_design.hpp', 'ship_editor.hpp']
 
 repo = Path(sys.argv[1]).resolve()

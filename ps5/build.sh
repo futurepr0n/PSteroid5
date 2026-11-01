@@ -53,7 +53,8 @@ PSTEROIDS_LIVE=${PSTEROIDS_LIVE:-} "$app/test-net" "$(cat "$app/fixture.port")" 
 # Ship editor: model tests, then evidence judged by CSSteroids-2's own server validators and
 # browser ship.js (tools/ship-evidence.js; property sessions, gallery round trips, rebuilds).
 g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/test_editor.cpp" -o "$app/test-editor"
-"$app/test-editor"
+"$app/test-editor" "$app/hull-evidence.json"
+"/mnt/c/Program Files/nodejs/node.exe" "$(wslpath -w "$repo/tools/hull-evidence.mjs")" "$(wslpath -w "$app/hull-evidence.json")"
 g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/ship_evidence.cpp" -o "$app/ship-evidence"
 "$app/ship-evidence" "$repo/ps5/testdata/ship_corpus.json" "$app/ship_evidence.json" 400
 if [[ -x "/mnt/c/Program Files/nodejs/node.exe" && -d $repo/../CSSTeroids-2 ]]; then
