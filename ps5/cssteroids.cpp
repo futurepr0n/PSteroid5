@@ -69,6 +69,8 @@ class VulkanExample : public ps5ui::KitExample {
     int patternTool=0, patternMenuIndex=0, patternPreset=0, patternLibraryIndex=-1, patternRevision=0, previewRevision=-1;
     double patternScale=5, patternWidth=1, tileZoom=1;
     size_t shipZoomIndex=0;   // index into pattern::view_zooms; 0 fits the whole ship
+    size_t editorZoomIndex=0;
+    cssteroids::editor::pattern::View editorView{{0,0},canvas_scale};
     cssteroids::editor::Pt tilePan;
     bool patternR2=false,patternL2=false;
     const std::array<std::string,7> patternNames={"grid","hex","triangle","diamond","ribs","crosshatch","blank"};
@@ -888,8 +890,22 @@ class VulkanExample : public ps5ui::KitExample {
         }
         return edGeometry;
     }
-    float toScreenX(double x) const { return canvas_left + float(x + 200) * canvas_scale; }
-    float toScreenY(double y) const { return canvas_top + float(y + 200) * canvas_scale; }
+    float toScreenX(double x) const { return canvas_left + canvas_px / 2 + float((x - editorView.centre.x) * editorView.scale); }
+    float toScreenY(double y) const { return canvas_top + canvas_px / 2 + float((y - editorView.centre.y) * editorView.scale); }
+    // Frames the editable square plus anything scaled beyond it; unchanged for ships inside ±200, zoom follows the cursor
+    void updateEditorView() {
+        using namespace cssteroids::editor;
+        auto framed = ed.ship.lines;
+        framed.push_back({{-half, -half}, {half, half}});
+        for (const auto *pts : {&ed.ship.thrusters, &ed.ship.weapons}) for (auto p : *pts) framed.push_back({p, p});
+        editorView = pattern::fit_view(framed, canvas_px, pattern::view_zooms[std::min(editorZoomIndex, pattern::view_zooms.size() - 1)], cursor, 0);
+    }
+    bool inCanvas(float x, float y) const { return x >= canvas_left && x <= canvas_left + canvas_px && y >= canvas_top && y <= canvas_top + canvas_px; }
+    void canvasLine(float x1, float y1, float x2, float y2, float width, hui::gfx::Color color) {
+        using namespace cssteroids::editor;
+        static const pattern::Region box{{{canvas_left, canvas_top}, {canvas_left + canvas_px, canvas_top}, {canvas_left + canvas_px, canvas_top + canvas_px}, {canvas_left, canvas_top + canvas_px}}, {}, {}, double(canvas_px) * canvas_px};
+        for (const auto &l : pattern::clip(Line{{x1, y1}, {x2, y2}, "white"}, box)) scene.line(float(l.a.x), float(l.a.y), float(l.b.x), float(l.b.y), width, color);
+    }
     cssteroids::editor::Pt snapped() const {
         using namespace cssteroids::editor;
         Pt p = clamp_canvas(snap(cursor, fineGrid ? fine : grid));
@@ -1274,8 +1290,9 @@ class VulkanExample : public ps5ui::KitExample {
         cursor.x += sx * std::fabs(sx) * speed * dt; cursor.y += sy * std::fabs(sy) * speed * dt;
         if (pressed & PAD_LEFT) cursor.x = snap(cursor, step).x - step;
         if (pressed & PAD_RIGHT) cursor.x = snap(cursor, step).x + step;
-        if (pressed & PAD_UP) cursor.y = snap(cursor, step).y - step;
-        if (pressed & PAD_DOWN) cursor.y = snap(cursor, step).y + step;
+        // D-pad up/down zooms the canvas around the cursor
+        if ((pressed & PAD_UP) && editorZoomIndex + 1 < pattern::view_zooms.size()) ++editorZoomIndex;
+        if ((pressed & PAD_DOWN) && editorZoomIndex > 0) --editorZoomIndex;
         if (pad.touch_count > 0) {
             if (!touchSeen) { touchSeen = true; say("PSteroid5 editor: touchpad active (first finger at %.0f,%.0f)", pad.touch_x, pad.touch_y); }
             if (lastTouchCount > 0 && pad.touch_id == lastTouchId) { // same finger: move by its travel
@@ -1307,16 +1324,27 @@ class VulkanExample : public ps5ui::KitExample {
         using namespace cssteroids::editor;
         if(patternOpen){drawPattern();return;}
         const double now = wall_ms();
-        // canvas, grid every 5 units (brighter every 25), mirror axis, front marker
+        updateEditorView();
+        // canvas, grid every 5 units (brighter every 25; minor lines hidden when zoomed out), editable square, mirror axis, front marker
         scene.rounded_rect({canvas_left, canvas_top, canvas_px, canvas_px}, 6, Color::rgb(0x050a12));
+        const bool minorGrid = editorView.scale * grid >= 6;
         for (int u = -200; u <= 200; u += 5) {
             const bool major = u % 25 == 0;
+            if (!major && !minorGrid) continue;
             const float a = major ? .16f : .06f;
-            scene.line(toScreenX(u), canvas_top, toScreenX(u), canvas_top + canvas_px, 1, Color::rgb(0x6f8fb0, u == 0 ? .35f : a));
-            scene.line(canvas_left, toScreenY(u), canvas_left + canvas_px, toScreenY(u), 1, Color::rgb(0x6f8fb0, a));
+            canvasLine(toScreenX(u), toScreenY(-half), toScreenX(u), toScreenY(half), 1, Color::rgb(0x6f8fb0, u == 0 ? .35f : a));
+            canvasLine(toScreenX(-half), toScreenY(u), toScreenX(half), toScreenY(u), 1, Color::rgb(0x6f8fb0, a));
         }
-        if (ed.mirrorOn) scene.line(toScreenX(0), canvas_top, toScreenX(0), canvas_top + canvas_px, 2, Color::rgb(0x70caff, .5f));
+        if (editorView.scale < canvas_scale - 1e-6) {
+            const float l = toScreenX(-half), t = toScreenY(-half), r = toScreenX(half), b = toScreenY(half);
+            canvasLine(l, t, r, t, 1, Color::rgb(0x2ef2ff, .4f)); canvasLine(r, t, r, b, 1, Color::rgb(0x2ef2ff, .4f));
+            canvasLine(r, b, l, b, 1, Color::rgb(0x2ef2ff, .4f)); canvasLine(l, b, l, t, 1, Color::rgb(0x2ef2ff, .4f));
+        }
+        if (ed.mirrorOn) canvasLine(toScreenX(0), canvas_top, toScreenX(0), canvas_top + canvas_px, 2, Color::rgb(0x70caff, .5f));
         text("FRONT", toScreenX(0) - 28, canvas_top - 10, 18, 0x8293ab);
+        const double zoom = pattern::view_zooms[std::min(editorZoomIndex, pattern::view_zooms.size() - 1)];
+        char zoomLabel[24]; std::snprintf(zoomLabel, sizeof zoomLabel, zoom > 1 ? "ZOOM %.0f%%" : "FIT", zoom * 100);
+        text(zoomLabel, canvas_left + canvas_px - 110, canvas_top - 10, 18, 0x6d8893);
         // the ship at design scale
         const int hot = (tool == Tool::erase || tool == Tool::paint) ? ed.nearest_line(cursor) : -1;
         for (size_t i = 0; i < ed.ship.lines.size(); i++) {
@@ -1328,24 +1356,24 @@ class VulkanExample : public ps5ui::KitExample {
                 const double t=double(j)/steps,u=1-t;
                 const Pt next=l.curved?Pt{u*u*l.a.x+2*u*t*l.control.x+t*t*l.b.x,u*u*l.a.y+2*u*t*l.control.y+t*t*l.b.y}
                                       :Pt{l.a.x+(l.b.x-l.a.x)*t,l.a.y+(l.b.y-l.a.y)*t};
-                scene.line(toScreenX(prev.x),toScreenY(prev.y),toScreenX(next.x),toScreenY(next.y),int(i)==hot?6.f:float(l.width)*1.5f,
+                canvasLine(toScreenX(prev.x),toScreenY(prev.y),toScreenX(next.x),toScreenY(next.y),int(i)==hot?6.f:float(l.width)*1.5f,
                            Color::rgb(int(i)==hot?(tool==Tool::erase?0xff4040:cssteroids::css_color(currentColor())):col));
                 prev=next;
             }
-            scene.circle(toScreenX(l.a.x), toScreenY(l.a.y), 3, Color::rgb(col)); scene.circle(toScreenX(l.b.x), toScreenY(l.b.y), 3, Color::rgb(col));
+            for (auto p : {l.a, l.b}) if (inCanvas(toScreenX(p.x), toScreenY(p.y))) scene.circle(toScreenX(p.x), toScreenY(p.y), 3, Color::rgb(col));
         }
-        for (const auto &t : ed.ship.thrusters) { scene.ring(toScreenX(t.x), toScreenY(t.y), 10, 3, Color::rgb(0xffa500)); scene.line(toScreenX(t.x), toScreenY(t.y), toScreenX(t.x), toScreenY(t.y + 14), 4, Color::rgb(0xff6000, .8f)); }
-        for (const auto &w : ed.ship.weapons) { scene.ring(toScreenX(w.x), toScreenY(w.y), 10, 3, Color::rgb(0xff4040)); scene.line(toScreenX(w.x), toScreenY(w.y), toScreenX(w.x), canvas_top, 1, Color::rgb(0xff4040, .35f)); }
+        for (const auto &t : ed.ship.thrusters) { if (!inCanvas(toScreenX(t.x), toScreenY(t.y))) continue; scene.ring(toScreenX(t.x), toScreenY(t.y), 10, 3, Color::rgb(0xffa500)); canvasLine(toScreenX(t.x), toScreenY(t.y), toScreenX(t.x), toScreenY(t.y + 14), 4, Color::rgb(0xff6000, .8f)); }
+        for (const auto &w : ed.ship.weapons) { if (!inCanvas(toScreenX(w.x), toScreenY(w.y))) continue; scene.ring(toScreenX(w.x), toScreenY(w.y), 10, 3, Color::rgb(0xff4040)); canvasLine(toScreenX(w.x), toScreenY(w.y), toScreenX(w.x), canvas_top, 1, Color::rgb(0xff4040, .35f)); }
         // cursor, pending line and its mirror, grabbed point
         const Pt at = snapped();
         if (pending) {
-            scene.line(toScreenX(pendingStart.x), toScreenY(pendingStart.y), toScreenX(at.x), toScreenY(at.y), 3, Color::rgb(cssteroids::css_color(currentColor()), .8f));
-            if (ed.mirrorOn) scene.line(toScreenX(mirror(pendingStart).x), toScreenY(pendingStart.y), toScreenX(mirror(at).x), toScreenY(at.y), 2, Color::rgb(cssteroids::css_color(currentColor()), .4f));
+            canvasLine(toScreenX(pendingStart.x), toScreenY(pendingStart.y), toScreenX(at.x), toScreenY(at.y), 3, Color::rgb(cssteroids::css_color(currentColor()), .8f));
+            if (ed.mirrorOn) canvasLine(toScreenX(mirror(pendingStart).x), toScreenY(pendingStart.y), toScreenX(mirror(at).x), toScreenY(at.y), 2, Color::rgb(cssteroids::css_color(currentColor()), .4f));
         }
-        if (grabbing) scene.line(toScreenX(grabFrom.x), toScreenY(grabFrom.y), toScreenX(at.x), toScreenY(at.y), 2, Color::rgb(0x70caff, .7f));
+        if (grabbing) canvasLine(toScreenX(grabFrom.x), toScreenY(grabFrom.y), toScreenX(at.x), toScreenY(at.y), 2, Color::rgb(0x70caff, .7f));
         const float cx = toScreenX(at.x), cy = toScreenY(at.y);
-        scene.line(cx - 14, cy, cx + 14, cy, 2, Color::rgb(0xffffff)); scene.line(cx, cy - 14, cx, cy + 14, 2, Color::rgb(0xffffff));
-        if (ed.mirrorOn && at.x != 0) scene.ring(toScreenX(-at.x), cy, 6, 1.5f, Color::rgb(0x70caff, .6f));
+        canvasLine(cx - 14, cy, cx + 14, cy, 2, Color::rgb(0xffffff)); canvasLine(cx, cy - 14, cx, cy + 14, 2, Color::rgb(0xffffff));
+        if (ed.mirrorOn && at.x != 0 && inCanvas(toScreenX(-at.x), cy)) scene.ring(toScreenX(-at.x), cy, 6, 1.5f, Color::rgb(0x70caff, .6f));
         // TV-safe rail, canvas and context inspector, adapted from the browser designer.
         text("SHIP DESIGNER",60,80,36,0x00ffff);
         text(ed.ship.name,380,80,30,0xffffff);
@@ -1362,9 +1390,11 @@ class VulkanExample : public ps5ui::KitExample {
         text("Save / Scale",75,897,20,0x8293ab);
         text("Test flight",75,929,20,0x8293ab);
         // Rotation centre is fixed, independent of cursor and mirroring.
-        scene.ring(toScreenX(0),toScreenY(0),8,2,Color::rgb(0xff00ff));
-        scene.line(toScreenX(0)-12,toScreenY(0),toScreenX(0)+12,toScreenY(0),1,Color::rgb(0xff00ff));
-        scene.line(toScreenX(0),toScreenY(0)-12,toScreenX(0),toScreenY(0)+12,1,Color::rgb(0xff00ff));
+        if(inCanvas(toScreenX(0),toScreenY(0))){
+            scene.ring(toScreenX(0),toScreenY(0),8,2,Color::rgb(0xff00ff));
+            scene.line(toScreenX(0)-12,toScreenY(0),toScreenX(0)+12,toScreenY(0),1,Color::rgb(0xff00ff));
+            scene.line(toScreenX(0),toScreenY(0)-12,toScreenX(0),toScreenY(0)+12,1,Color::rgb(0xff00ff));
+        }
         const float px=1160;
         char line[160];
         text("INSPECTOR",px,195,28,0x00ffff);
@@ -1389,11 +1419,15 @@ class VulkanExample : public ps5ui::KitExample {
         text("ACTUAL FLIGHT SIZE",px+12,515,18,0x8293ab);
         drawShip(g,px+150,620,float(now/1400.0),1,true);
         scene.rounded_rect({px+320,485,320,240},8,Color::rgb(0x091525));
-        text("3x  HULL / PATTERN",px+332,515,18,0x8293ab);
-        for(const auto &w:cssteroids::ship_segments(g,px+480,620,0,3))
+        Pt lo,hi;double extent=0;
+        if(pattern::bounds(ed.ship.lines,lo,hi))extent=std::max({std::fabs(lo.x),std::fabs(lo.y),std::fabs(hi.x),std::fabs(hi.y)});
+        const float detail=extent>0?float(std::min(3.,100/(extent*.25))):3.f;
+        std::snprintf(line,sizeof line,"%.1fx  HULL / PATTERN",detail);
+        text(line,px+332,515,18,0x8293ab);
+        for(const auto &w:cssteroids::ship_segments(g,px+480,620,0,detail))
             scene.line(float(w.x1),float(w.y1),float(w.x2),float(w.y2),w.width,Color::rgb(w.color));
         text("MAGENTA  Rotation centre",px,768,20,0xff80ff);
-        text("STICK / TOUCHPAD  Cursor    D-PAD  Step",px,810,20,0x8293ab);
+        text("STICK / TOUCHPAD  Cursor    D-PAD  Step / Zoom",px,810,20,0x8293ab);
         text("CROSS  Place    SQUARE  Undo    TRIANGLE  Redo",px,844,20,0x8293ab);
         text("R3  Mirror    L3  Fine grid    OPTIONS  Save / Test",px,878,20,0x8293ab);
         text("Touchpad: hold press to drag a line or point",px,912,20,0x8293ab);

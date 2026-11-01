@@ -101,6 +101,14 @@ int main(int argc,char **argv){
         Line curve{{-10,0},{10,0}};curve.curved=true;curve.control={0,-400};Pt lo,hi;
         assert(pat::bounds({curve},lo,hi) && lo.y<-190 && hi.y==0);
         Line bad{{NAN,0},{5,5}};assert(!pat::bounds({bad},lo,hi));
+        // Ship editor framing: the ±200 square plus the ship, no margin; ships inside it keep today's 2 px per unit
+        std::vector<Line> framed={{{-50,-80},{40,90}},{{-200,-200},{200,200}}};
+        auto editorView=pat::fit_view(framed,800,1,{150,150},0);
+        assert(std::fabs(editorView.scale-2)<1e-9 && std::fabs(editorView.centre.x)<1e-9 && std::fabs(editorView.centre.y)<1e-9);
+        framed.push_back({{-600,-600},{600,600}});
+        auto scaled=pat::fit_view(framed,800,1,{},0);assert(std::fabs(scaled.scale-800./1200)<1e-9);
+        auto zoomed=pat::fit_view(framed,800,4,{550,-590},0);
+        assert(std::fabs(zoomed.scale-800./1200*4)<1e-9 && zoomed.centre.x+400/zoomed.scale<=600+1e-9 && zoomed.centre.y-400/zoomed.scale>=-600-1e-9);
         auto c=pat::centre_of({{0,0},{10,4},{2,-6}});assert(c.x==5 && c.y==-1);
         assert(pat::centre_of({}).x==0);
     }
