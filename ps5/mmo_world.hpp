@@ -221,13 +221,21 @@ inline json::Value ship_payload(const ShipDesign &d) {
     json::Value out = json::Value::object();
     auto design_space = [](float v) { return json::Value::number_value(std::round(double(v) * 4 * 100) / 100); };
     json::Value lines; lines.type = json::Value::Type::array;
-    for (size_t i = 0; i < d.geometry.lines.size() && i < 500; i++) {
-        const auto &l = d.geometry.lines[i];
+    std::vector<const Segment *> relayed;
+    for(const auto &l:d.geometry.lines)relayed.push_back(&l);
+    if(relayed.size()>2000)std::erase_if(relayed,[](const auto *l){return l->mesh;});
+    const bool fallback=relayed.size()>2000;
+    if(fallback)relayed.clear();
+    for (const auto *line : relayed) {
+        const auto &l = *line;
         json::Value o = json::Value::object();
         o.set("startX", design_space(l.x1)); o.set("startY", design_space(l.y1));
         o.set("endX", design_space(l.x2)); o.set("endY", design_space(l.y2));
         char hex[8]; std::snprintf(hex, sizeof hex, "#%06x", l.color & 0xffffff);
         o.set("color", json::Value::string_value(hex));
+        o.set("width",json::Value::number_value(l.width));
+        if(l.mesh)o.set("mesh",json::Value::bool_value(true));
+        if(l.curved){o.set("controlX",design_space(l.cx));o.set("controlY",design_space(l.cy));}
         lines.items.push_back(std::move(o));
     }
     auto points = [&](const std::vector<Point> &pts, size_t limit) {
@@ -242,7 +250,7 @@ inline json::Value ship_payload(const ShipDesign &d) {
     out.set("customLines", std::move(lines));
     out.set("thrusterPoints", points(d.geometry.thrusters, 3));
     out.set("weaponPoints", points(d.geometry.weapons, 2));
-    out.set("shipType", json::Value::string_value(d.typeName.substr(0, 32)));
+    out.set("shipType", json::Value::string_value(fallback?"default":d.typeName.substr(0, 32)));
     out.set("shipColor", json::Value::string_value(d.colorName.substr(0, 32)));
     out.set("shipName", json::Value::string_value(d.name.substr(0, 32)));
     return out;

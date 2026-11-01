@@ -40,14 +40,14 @@ int main() {
         CHECK(!ed.toggle_point(false, {30, 90}));
         CHECK(ed.toggle_point(true, {20, -80}) && ed.ship.weapons.empty()); // removing one removes its mirror
         Editor many; many.mirrorOn = false;
-        for (int i = 0; i < 500; i++) CHECK(many.add_line({-190.0 + i % 380, -100}, {-190.0 + i % 380, 100 + (i / 380) * 5.0}, "#ffffff"));
-        CHECK(!many.add_line({0, 0}, {5, 5}, "#ffffff") && many.message == "more than 500 lines");
+        many.ship.lines.resize(max_lines,Line{{0,0},{10,10},"#ffffff"});
+        CHECK(!many.add_line({0, 0}, {5, 5}, "#ffffff") && many.message == "more than 5000 lines");
         CHECK(!many.set_name(std::string(40, 'x')) || many.ship.name.size() == 32);
     }
     {   // undo / redo restore exact states, and a new edit clears redo
         Editor ed;
         ed.add_line({-10, -10}, {-20, 20}, "#ffffff");
-        const Ship one = ed.ship;
+        const editor::Ship one = ed.ship;
         ed.add_line({-30, -30}, {-40, 40}, "#ffffff");
         CHECK(ed.undo() && ed.ship.lines.size() == one.lines.size());
         CHECK(ed.redo() && ed.ship.lines.size() == 4);
@@ -57,7 +57,7 @@ int main() {
         const int rev = ed.revision; ed.undo(); CHECK(ed.revision == rev + 1);
     }
     {   // save body: owned ships carry their passphrase (update), copies and new ships do not
-        Editor ed(Ship{"Arrow", "white", {{{0, -50}, {-30, 40}, "#ff0000"}}, {}, {{0, -50}}}, Ownership::owned, "swift-hawk-diving");
+        Editor ed(editor::Ship{"Arrow", "white", {{{0, -50}, {-30, 40}, "#ff0000"}}, {}, {{0, -50}}, "pew", {}}, Ownership::owned, "swift-hawk-diving");
         CHECK(ed.save_problem().empty());
         json::Value v; CHECK(json::parse(post_body(ed.ship, ed.passphrase, true), v));
         CHECK(v.str("passphrase") == "swift-hawk-diving" && v.str("type") == "custom" && v.get("isPublic")->b);
@@ -66,7 +66,7 @@ int main() {
         CHECK(v.str("shotSound") == "pew");          // the default for every ship
         ed.ship.shotSound = "laser";
         json::Value l; CHECK(json::parse(post_body(ed.ship, {}, true), l) && l.str("shotSound") == "laser");
-        Ship back; CHECK(from_server(l, back) && back.shotSound == "laser");
+        editor::Ship back; CHECK(from_server(l, back) && back.shotSound == "laser");
         json::Value w; CHECK(json::parse(post_body(ed.ship, {}, false), w) && !w.get("passphrase") && !w.get("isPublic")->b);
         Editor empty; empty.set_name("");
         CHECK(empty.save_problem() == "a name is required");
@@ -75,12 +75,12 @@ int main() {
     {   // loading a server ship is exact (fractional browser coordinates, custom hex, string columns)
         json::Value v;
         CHECK(json::parse(R"({"name":"two","type":"custom","color":"magenta","customLines":"[{\"startX\":-55.5,\"startY\":-34.59375,\"endX\":-69.5,\"endY\":-35.59375,\"color\":\"#ca3f3f\"}]","thrusterPoints":[{"x":-12.5,"y":101}],"weaponPoints":null})", v));
-        Ship s; CHECK(from_server(v, s) && s.shotSound == "pew"); // ships saved before shot sounds
+        editor::Ship s; CHECK(from_server(v, s) && s.shotSound == "pew"); // ships saved before shot sounds
         CHECK(s.lines.size() == 1 && s.lines[0].a.y == -34.59375 && s.lines[0].color == "#ca3f3f" && s.thrusters[0].x == -12.5 && s.weapons.empty());
         json::Value back; CHECK(json::parse(post_body(s, {}), back) && back.get("customLines")->items[0].num("endY") == -35.59375);
     }
     {   // a ship drawn beyond the canvas stays editable; new placements are clamped by the cursor
-        Ship wide; wide.lines.push_back({{-300, 0}, {300, 0}, "#ffffff"});
+        editor::Ship wide; wide.lines.push_back({{-300, 0}, {300, 0}, "#ffffff"});
         Editor ed(wide, Ownership::copy);
         CHECK(ed.legacyOutside && ed.set_name("Wide") && ed.add_line({0, -10}, {0, 10}, "#ffffff"));
         CHECK(ed.save_problem().empty());

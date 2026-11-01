@@ -9,12 +9,12 @@ enum class Screen { title, hangar, name, game, lobby, multiplayer, editor };
 const char *const menu_items[] = {"PLAY", "MULTIPLAYER", "MMO", "HANGAR", "SHIP EDITOR", "PILOT NAME", "SOUND", "REFRESH SCORES"};
 constexpr int menu_count = 8, menu_sound = 6;
 // Ship editor (docs/ship-design-space.md): tools, its OPTIONS menu, canvas placement.
-enum class Tool { line, move, erase, paint, thruster, weapon };
-const char *const tool_names[] = {"LINE", "MOVE", "ERASE", "PAINT", "THRUSTER", "WEAPON"};
-constexpr int tool_count = 6;
-const char *const editor_menu[] = {"SAVE", "SAVE AS NEW SHIP", "TEST FLIGHT", "RENAME SHIP", "CUSTOM COLOUR", "PUBLIC IN GALLERY", "WEAPON SOUND", "CLEAR ALL", "EXIT EDITOR"};
-constexpr int editor_menu_count = 9, editor_menu_sound = 6;
-constexpr float canvas_left = 110, canvas_top = 150, canvas_px = 860; // 400 design units square
+enum class Tool { line, move, erase, paint, thruster, weapon, fill };
+const char *const tool_names[] = {"LINE", "MOVE", "ERASE", "PAINT", "THRUSTER", "WEAPON", "FILL"};
+constexpr int tool_count = 7;
+const char *const editor_menu[] = {"SAVE", "SAVE AS NEW SHIP", "TEST FLIGHT", "RENAME SHIP", "CUSTOM COLOUR", "PUBLIC IN GALLERY", "WEAPON SOUND", "RESTORE LOCAL DRAFT", "SCALE DOWN 90%", "SCALE UP 110%", "CLEAR ALL", "EXIT EDITOR"};
+constexpr int editor_menu_count = 12, editor_menu_sound = 6;
+constexpr float canvas_left = 300, canvas_top = 170, canvas_px = 800; // 400 design units square
 constexpr float canvas_scale = canvas_px / 400;
 enum class LobbyStep { menu, list, code, waiting };
 const char *const lobby_items[] = {"CREATE ROOM", "BROWSE OPEN ROOMS", "ENTER ROOM CODE"};
@@ -26,6 +26,15 @@ constexpr int name_columns = 10, name_max = 16;
 
 class VulkanExample : public ps5ui::KitExample {
     cssteroids::Game game{uint32_t(std::chrono::steady_clock::now().time_since_epoch().count())};
+    cssteroids::visual::Starfield stars;
+    cssteroids::visual::Trail ownTrail;
+    struct RemoteTrail { cssteroids::visual::Trail trail; double x=0,y=0; bool located=false; };
+    std::map<std::string,RemoteTrail> remoteTrails;
+    Screen effectsScreen = Screen::title;
+    double effectsAccumulator = 0;
+    int draftRevision = -1, savedRevision = -1;
+    double draftDelay = 0;
+    bool draftFailed = false;
     cssteroids::ScoreStore scores;
     cssteroids::ShipStore shipStore{"/data/cssteroids-ps5/ship.json"};
     cssteroids::ShipDesign ship;
@@ -49,6 +58,19 @@ class VulkanExample : public ps5ui::KitExample {
     cssteroids::ShipGeometry edGeometry;           // what the saved ship will look like in game
     int edGeometryRevision = -1;
     Tool tool = Tool::line;
+    bool patternOpen=false, patternMenu=false, patternPending=false, patternGrabbing=false, patternDirty=false, nameForPattern=false;
+    cssteroids::editor::Editor tileEditor;
+    cssteroids::editor::Pt fillSeed, shipCursor, tileCursor, tileStart, tileGrab;
+    cssteroids::editor::pattern::Region fillRegion;
+    cssteroids::editor::pattern::Tile activeTile;
+    std::vector<cssteroids::editor::pattern::Tile> patternLibrary;
+    std::vector<cssteroids::editor::Line> patternPreview;
+    std::string fillId, patternError, savedSnapshot;
+    int patternTool=0, patternMenuIndex=0, patternPreset=0, patternLibraryIndex=-1, patternRevision=0, previewRevision=-1;
+    double patternScale=5, patternWidth=1, tileZoom=1;
+    cssteroids::editor::Pt tilePan;
+    bool patternR2=false,patternL2=false;
+    const std::array<std::string,7> patternNames={"grid","hex","triangle","diamond","ribs","crosshatch","blank"};
     int colorIndex = 0, menuIndex = 0, rgbChannel = 0;
     std::string customColor = "#ca3f3f";
     bool fineGrid = false, menuOpen = false, colorOpen = false, isPublic = true, testFlight = false, nameForShip = false;
@@ -191,7 +213,7 @@ class VulkanExample : public ps5ui::KitExample {
         using hui::gfx::Color;
         const float width = 2.f * std::max(1.f, scale * .6f);
         for (const auto &w : cssteroids::ship_segments(g, x, y, angle, scale))
-            scene.line(float(w.x1), float(w.y1), float(w.x2), float(w.y2), width, Color::rgb(w.color));
+            scene.line(float(w.x1), float(w.y1), float(w.x2), float(w.y2), g.custom() ? w.width * std::max(1.f, scale * .6f) : width, Color::rgb(w.color));
         for (const auto &d : cssteroids::ship_dots(g, x, y, angle, scale)) scene.circle(float(d.x), float(d.y), std::max(1.f, float(d.r)), Color::rgb(d.color));
         if (!thrusting) return;
         const float flicker = .7f + .3f * std::fabs(std::sin(game.time * 47)), c = std::cos(angle), sn = std::sin(angle), r = 15;
@@ -230,6 +252,86 @@ class VulkanExample : public ps5ui::KitExample {
             y += 34;
         }
     }
+    void drawStars() {
+        using hui::gfx::Color;
+        for(const auto &layer:stars.layers)for(const auto &s:layer.stars) {
+            const double twinkle=1-s.pulse*(.5+.5*std::sin(stars.time*s.speed+s.phase));
+            const float size=float(std::max(.5,s.size*(.8+.2*twinkle)));
+            for(double x=cssteroids::visual::wrap(s.x-stars.travelX*layer.depth);x<1920;x+=1024)
+                for(double y=cssteroids::visual::wrap(s.y-stars.travelY*layer.depth);y<1080;y+=1024)
+                    scene.rounded_rect({float(x)-size/2,float(y)-size/2,size,size},0,Color::rgb(s.color,float(layer.alpha*twinkle)));
+        }
+        for(const auto &s:stars.shooting)for(size_t i=1;i<s.tail.size();++i) {
+            const float k=float(i)/s.tail.size(), alpha=float(std::min(1.0,s.life/s.maxLife*1.5)*.8)*k;
+            scene.line(s.tail[i-1].x,s.tail[i-1].y,s.tail[i].x,s.tail[i].y,.5f+k*1.5f,Color::rgb(0xffffff,alpha));
+        }
+    }
+    void drawTrail(const cssteroids::visual::Trail &trail, float cameraX=0, float cameraY=0) {
+        using hui::gfx::Color;
+        using cssteroids::visual::Style;
+        const cssteroids::visual::Particle *prev[3]={};
+        for(const auto &p:trail.particles) {
+            const float t=float(p.life/p.maxLife), x=float(p.x)-cameraX, y=float(p.y)-cameraY;
+            if(p.style==Style::ribbon) {
+                const auto *a=prev[p.nozzle];prev[p.nozzle]=&p;
+                if(!a || std::fabs(a->x-p.x)>50 || std::fabs(a->y-p.y)>50)continue;
+                scene.line(float(a->x)-cameraX,float(a->y)-cameraY,x,y,float(p.size)*t*4,Color::rgb(p.color,t*.25f));
+                scene.line(float(a->x)-cameraX,float(a->y)-cameraY,x,y,float(p.size)*t,Color::rgb(p.color,t*.9f));
+            } else if(x>-20 && x<1940 && y>-20 && y<1100) {
+                if(p.style==Style::embers) {
+                    const float r=(float(p.size)*t+.5f)*1.6f;
+                    scene.circle(x,y,r*2,Color::rgb(p.color,t*.08f));
+                    scene.circle(x,y,r,Color::rgb(p.color,t*.25f));
+                    scene.circle(x,y,std::max(.6f,r*.4f),Color::rgb(p.color,t*.9f));
+                } else {
+                    const float size=std::max(1.f,std::round(float(p.size)*t*1.5f));
+                    scene.rounded_rect({std::round(x-size/2),std::round(y-size/2),size,size},0,Color::rgb(p.color,t>.5f?1:t*2));
+                }
+            }
+        }
+    }
+    void updateSpace(float dt, bool intercepted) {
+        using namespace cssteroids;
+        if(effectsScreen!=screen) {
+            ownTrail.clear();remoteTrails.clear();effectsAccumulator=0;effectsScreen=screen;
+        }
+        const bool single=screen==Screen::game, multi=screen==Screen::multiplayer;
+        const bool frozen=single && (paused || intercepted);
+        if(frozen)return;
+        const bool flying=single && !game.over && !game.ship.exploding;
+        const bool online=multi && !mp.dead && mp.phase==mmo::Phase::playing;
+        const double vx=flying?game.ship.vx:online?mp.vx:0, vy=flying?game.ship.vy:online?mp.vy:0;
+        // Remote rendered motion supplies speed only; emission positions remain in world space.
+        std::map<std::string,std::pair<double,double>> velocities;
+        if(multi && mp.phase!=mmo::Phase::playing)remoteTrails.clear();
+        if(multi && mp.phase==mmo::Phase::playing) {
+            std::erase_if(remoteTrails,[&](const auto &entry){
+                const auto it=mp.players.find(entry.first);
+                return it==mp.players.end() || it->second.dead || it->second.outOfView;
+            });
+            for(const auto &[id,p]:mp.players) {
+                if(p.dead || p.outOfView || (remoteTrails.size()>=64 && !remoteTrails.count(id)))continue;
+                auto &r=remoteTrails[id];
+                const double frames=std::max(.001,double(dt)*60);
+                if(r.located && std::hypot(p.x-r.x,p.y-r.y)>100)r.trail.clear();
+                velocities[id]={r.located?(p.x-r.x)/frames:0,r.located?(p.y-r.y)/frames:0};
+                r.x=p.x;r.y=p.y;r.located=true;
+            }
+        }
+        effectsAccumulator=std::min(effectsAccumulator+dt,6*visual::tick);
+        while(effectsAccumulator>=visual::tick) {
+            stars.step(vx,vy);
+            if(single)ownTrail.step(game.geometry,game.ship.x,game.ship.y,game.ship.angle,vx,vy,game.ship.thrusting,flying,game.ship.effects);
+            else if(multi) {
+                ownTrail.step(ship.geometry,mp.x,mp.y,mp.angle,vx,vy,mp.thrusting,online,mp.effects_left(mp.effects,wall_ms()));
+                for(auto &[id,r]:remoteTrails) {
+                    const auto &p=mp.players.at(id);const auto v=velocities.at(id);
+                    r.trail.step(p.geometry,p.x,p.y,p.angle,v.first,v.second,p.thrust,!p.dead,mp.effects_left(p.effects,wall_ms()));
+                }
+            }
+            effectsAccumulator-=visual::tick;
+        }
+    }
     void drawWorld() {
         using hui::gfx::Color;
         for (const auto &a : game.asteroids) {
@@ -255,6 +357,7 @@ class VulkanExample : public ps5ui::KitExample {
         for (const auto &d : game.debris)
             scene.line(d.x, d.y, d.x + std::cos(d.rotation) * d.length, d.y + std::sin(d.rotation) * d.length, 2,
                        Color::rgb(d.color, d.life > .5f ? 1.f : d.life * 2));
+        drawTrail(ownTrail);
         const auto &s = game.ship;
         if (!game.over && !s.exploding && (!s.invulnerable() || int(s.invulnerableTime * 10) % 2 == 0)) {
             drawShip(game.geometry, s.x, s.y, s.angle, 1, s.thrusting);
@@ -324,7 +427,7 @@ class VulkanExample : public ps5ui::KitExample {
     }
     void drawNameEntry() {
         using hui::gfx::Color;
-        centered("PILOT NAME", 160, 56);
+        centered(nameForPattern?"PATTERN NAME":nameForShip?"SHIP NAME":"PILOT NAME",160,56);
         centered(nameDraft + (int(game.time * 2) % 2 ? "_" : " "), 260, 48, 0xffd700);
         for (size_t i = 0; i < name_chars.size(); i++) {
             const float x = 660 + float(i % name_columns) * 64, y = 380 + float(i / name_columns) * 72;
@@ -636,6 +739,8 @@ class VulkanExample : public ps5ui::KitExample {
             const float r = float(bu.age) * (bu.big ? 90.f : 40.f);
             scene.ring(sx(bu.x), sy(bu.y), r, 2, Color::rgb(bu.color ? bu.color : 0xffa040, float(1 - bu.age)));
         }
+        drawTrail(ownTrail,camX,camY);
+        for(const auto &[id,r]:remoteTrails)drawTrail(r.trail,camX,camY);
         const int shield = int(cssteroids::powerups::Type::shield);
         for (const auto &[id, p] : mp.players) {
             if (p.dead || p.outOfView || !visible(p.x, p.y, 40)) continue;
@@ -728,8 +833,9 @@ class VulkanExample : public ps5ui::KitExample {
         mkdir("/data/cssteroids-ps5", 0777);
         std::ofstream("/data/cssteroids-ps5/owned.txt", std::ios::app) << pass << "\n";
     }
-    void openEditor() {
+    void openEditor(bool restoreDraft=false) {
         using namespace cssteroids::editor;
+        if(saveRequest.pending()) { onlineStatus="Ship save is finishing; open the editor again shortly"; return; }
         Ship start;
         Ownership own = Ownership::fresh;
         std::string pass;
@@ -739,13 +845,38 @@ class VulkanExample : public ps5ui::KitExample {
             own = mine ? Ownership::owned : Ownership::copy;
             if (mine) pass = ship.passphrase;
         } else start.name = (pilot + "'s ship").substr(0, max_name);
+        isPublic=!v.get("isPublic") || v.get("isPublic")->b;
+        lastSavedPass.clear();
+        // A local completed draft survives exiting/restarting without a server write.
+        cssteroids::json::Value pendingPattern;
+        std::ifstream draft("/data/cssteroids-ps5/editor-draft.json");
+        if(restoreDraft && draft) {
+            std::stringstream buffer;buffer<<draft.rdbuf();cssteroids::json::Value dv;
+            if(buffer.str().size()<(2u<<20) && cssteroids::json::parse(buffer.str(),dv) && from_server(dv,start)) {
+                pass=dv.str("passphrase");
+                own=!pass.empty() && std::find(owned.begin(),owned.end(),pass)!=owned.end()?Ownership::owned:Ownership::copy;
+                if(own!=Ownership::owned)pass.clear();
+                isPublic=!dv.get("isPublic") || dv.get("isPublic")->b;
+                if(const auto *pending=dv.get("patternDraft"))pendingPattern=*pending;
+            }
+        }
+        if(restoreDraft && !draft) { edStatus="No local draft yet";return; }
         ed = Editor(start, own, pass);
+        patternOpen=patternMenu=false;patternRevision=0;nameForPattern=false;
+        edGeometryRevision=-1;draftRevision=ed.revision;savedRevision=-1;draftFailed=false;draftDelay=0;
         cursor = {0, 0}; pending = grabbing = menuOpen = colorOpen = false; tool = Tool::line;
         edStatus = own == Ownership::owned ? "Editing your ship: SAVE updates it (" + pass + ")"
                  : own == Ownership::copy ? "Editing a copy of \"" + start.name + "\": SAVE makes a new ship"
                  : "New ship: LINE tool, CROSS to start and end each line";
         if (ed.legacyOutside) edStatus = "This ship was drawn beyond the editor's canvas; it can be edited and saved as it is";
         screen = Screen::editor;
+        if(restoreDraft && pendingPattern.is_object()){
+            if(const auto *seed=pendingPattern.get("seed"))openPattern({seed->num("x"),seed->num("y")});
+            if(patternOpen && pendingPattern.get("tile")){
+                auto tile=cssteroids::editor::pattern::read_tile(*pendingPattern.get("tile"));
+                if(cssteroids::editor::pattern::valid(tile)){loadPatternTile(tile);patternScale=pendingPattern.num("scale",5);fillId=pendingPattern.str("fillId");patternDirty=true;previewRevision=-1;}
+            }
+        }
     }
     // The saved ship as the game will draw it: through the same JSON path as a server reply.
     const cssteroids::ShipGeometry &editorGeometry() {
@@ -765,6 +896,189 @@ class VulkanExample : public ps5ui::KitExample {
         if ((tool == Tool::line || tool == Tool::move) && ed.nearest_vertex(cursor, v, snap_radius) && inside(v)) p = v; // join existing points
         return p;
     }
+    cssteroids::editor::pattern::Tile currentTile() const {
+        auto t=activeTile;t.original={};t.lines.clear();t.width=patternWidth;
+        const double k=t.side/400.;
+        for(auto l:tileEditor.ship.lines){
+            l.a={(l.a.x+200)*k,(l.a.y+200)*k};l.b={(l.b.x+200)*k,(l.b.y+200)*k};
+            if(l.curved)l.control={(l.control.x+200)*k,(l.control.y+200)*k};
+            t.lines.push_back(std::move(l));
+        }
+        return t;
+    }
+    void loadPatternTile(cssteroids::editor::pattern::Tile t) {
+        using namespace cssteroids::editor;
+        activeTile=t;patternWidth=t.width;
+        Ship s;s.name=t.name.substr(0,max_name);s.color=t.color;
+        const double k=400./t.side;
+        for(auto l:t.lines){l.a={l.a.x*k-200,l.a.y*k-200};l.b={l.b.x*k-200,l.b.y*k-200};if(l.curved)l.control={l.control.x*k-200,l.control.y*k-200};s.lines.push_back(std::move(l));}
+        tileEditor=Editor(s);tileEditor.mirrorOn=false;tileCursor={};tilePan={};tileZoom=1;
+        patternPending=patternGrabbing=false;previewRevision=-1;++patternRevision;
+    }
+    void openPattern(cssteroids::editor::Pt seed) {
+        using namespace cssteroids::editor;
+        std::string error;auto rs=pattern::regions(ed.ship.lines,error);
+        if(!error.empty()){ed.message=error;return;}
+        const auto *r=pattern::region_at(rs,seed);
+        if(!r){ed.message="Choose a closed hull region; join any open endpoints first";return;}
+        fillRegion=*r;fillSeed=seed;shipCursor=cursor;fillId.clear();patternScale=5;patternDirty=false;
+        auto tile=pattern::preset("grid");tile.color=currentColor();for(auto &l:tile.lines)l.color=tile.color;
+        for(const auto &f:ed.ship.fills)if(pattern::match(rs,f)==r){
+            fillId=f.id;patternScale=f.scale;
+            if(f.kind=="custom")tile=f.tile;
+            else {tile=pattern::preset(f.kind);tile.color=f.color;for(auto &l:tile.lines){l.color=f.color;l.width=f.width;}patternScale=std::max(.05,f.scale/2);}
+            break;
+        }
+        loadPatternTile(tile);patternOpen=true;patternMenu=false;patternMenuIndex=0;patternTool=0;
+        patternError.clear();pending=grabbing=touchDown=false;lastTouchCount=0;
+    }
+    bool applyPattern(bool close=true) {
+        using namespace cssteroids::editor;
+        if(!ed.apply_fill(fillSeed,currentTile(),patternScale,fillId)){patternError=ed.message;return false;}
+        patternDirty=false;patternError.clear();++patternRevision;
+        if(close){patternOpen=patternMenu=false;cursor=shipCursor;pending=grabbing=touchDown=false;lastTouchCount=0;}
+        saveDraft();return true;
+    }
+    void previewPattern() {
+        const int revision=tileEditor.revision+patternRevision;
+        if(previewRevision==revision)return;
+        previewRevision=revision;patternError.clear();
+        patternPreview=cssteroids::editor::pattern::repeat(fillRegion,currentTile(),patternScale,patternError);
+    }
+    void patternPress() {
+        using namespace cssteroids::editor;
+        auto at=clamp_canvas(snap(tileCursor,fineGrid?fine:grid));Pt vertex;
+        if(patternTool<2 && tileEditor.nearest_vertex(tileCursor,vertex))at=vertex;
+        const int before=tileEditor.revision;
+        if(patternTool==0){
+            if(!patternPending){tileStart=at;patternPending=true;return;}
+            if(tileEditor.ship.lines.size()+(tileEditor.mirrorOn?2:1)>256){patternError="A pattern tile supports at most 256 lines";return;}
+            tileEditor.add_line(tileStart,at,currentColor(),patternWidth);patternPending=false;
+        }else if(patternTool==1){
+            if(!patternGrabbing){if(tileEditor.nearest_vertex(tileCursor,vertex,10)){tileGrab=vertex;patternGrabbing=true;}else patternError="Choose a tile endpoint";return;}
+            tileEditor.move_point(tileGrab,at);patternGrabbing=false;
+        }else if(patternTool==2)tileEditor.erase_near(tileCursor);
+        else tileEditor.paint_near(tileCursor,currentColor(),patternWidth);
+        if(tileEditor.revision!=before){++patternRevision;patternDirty=true;previewRevision=-1;}
+        else patternError=tileEditor.message;
+    }
+    void loadPatternLibrary() {
+        std::ifstream f("/data/cssteroids-ps5/pattern-library.json");if(!f)return;
+        std::stringstream data;data<<f.rdbuf();cssteroids::json::Value a;
+        if(data.str().size()>(2u<<20) || !cssteroids::json::parse(data.str(),a) || !a.is_array())return;
+        patternLibrary.clear();for(const auto &v:a.items){auto t=cssteroids::editor::pattern::read_tile(v);if(cssteroids::editor::pattern::valid(t))patternLibrary.push_back(t);if(patternLibrary.size()==32)break;}
+    }
+    void savePatternLibrary() {
+        using namespace cssteroids;
+        if(patternLibrary.empty())loadPatternLibrary();auto t=currentTile();
+        if(!editor::pattern::valid(t)){patternError="Invalid tile; library unchanged";return;}
+        auto next=patternLibrary;auto it=std::find_if(next.begin(),next.end(),[&](const auto &old){return old.name==t.name;});
+        if(it!=next.end())*it=t;else if(next.size()<32)next.push_back(t);else {patternError="Local library is full (32 patterns)";return;}
+        json::Value a;a.type=json::Value::Type::array;for(const auto &p:next)a.items.push_back(editor::pattern::tile_json(p));
+        mkdir("/data/cssteroids-ps5",0777);const std::string path="/data/cssteroids-ps5/pattern-library.json",tmp=path+".tmp";
+        std::ofstream f(tmp,std::ios::trunc);f<<json::dump(a);bool ok=bool(f.flush());f.close();
+        if(!ok || std::rename(tmp.c_str(),path.c_str())!=0){patternError="Could not save local pattern library";return;}
+        patternLibrary=next;patternError="Pattern saved to this console's library";
+    }
+    void patternInput(const struct pad &pad,float dt) {
+        using namespace cssteroids::editor;
+        const uint32_t pressed=pad.pressed;
+        if(patternMenu){
+            constexpr int count=13;
+            if(pressed & PAD_UP)patternMenuIndex=(patternMenuIndex+count-1)%count;
+            if(pressed & PAD_DOWN)patternMenuIndex=(patternMenuIndex+1)%count;
+            if(pressed & (PAD_CIRCLE|PAD_OPTIONS)){patternMenu=false;return;}
+            const int direction=(pressed & PAD_LEFT)?-1:(pressed & PAD_RIGHT)?1:0;
+            const bool activate=pressed & PAD_CROSS;
+            if(patternMenuIndex==2 && (activate || direction)){
+                patternPreset=(patternPreset+(direction?direction:1)+7)%7;
+                auto t=patternNames[patternPreset]=="blank"?pattern::Tile{}:pattern::preset(patternNames[patternPreset]);
+                t.color=currentColor();for(auto &l:t.lines){l.color=t.color;l.width=patternWidth;}t.width=patternWidth;
+                loadPatternTile(t);patternDirty=true;return;
+            }
+            if(patternMenuIndex==3 && (activate || direction)){
+                patternScale=std::clamp(patternScale*(direction<0?.8:1.25),.05,10000.);++patternRevision;previewRevision=-1;patternDirty=true;return;
+            }
+            if(patternMenuIndex==4 && (activate || direction)){patternWidth=patternWidth==1?2:1;++patternRevision;patternDirty=true;return;}
+            if(patternMenuIndex==5 && (activate || direction)){tileZoom=tileZoom>=4?1:tileZoom*2;double limit=200-200/tileZoom;tilePan={std::clamp(tileCursor.x,-limit,limit),std::clamp(tileCursor.y,-limit,limit)};return;}
+            if(!activate)return;
+            if(patternMenuIndex==0){applyPattern();return;}
+            if(patternMenuIndex==1){patternOpen=patternMenu=false;patternPending=patternGrabbing=touchDown=false;cursor=shipCursor;++patternRevision;saveDraft();return;}
+            if(patternMenuIndex==6){saveDraft();screen=Screen::name;nameForPattern=true;nameForShip=false;nameDraft=activeTile.name.substr(0,name_max);nameCursor=0;patternMenu=false;return;}
+            if(patternMenuIndex==7){savePatternLibrary();return;}
+            if(patternMenuIndex==8){loadPatternLibrary();if(patternLibrary.empty()){patternError="No local patterns saved yet";return;}patternLibraryIndex=(patternLibraryIndex+1)%int(patternLibrary.size());loadPatternTile(patternLibrary[patternLibraryIndex]);patternDirty=true;return;}
+            if(patternMenuIndex==9){if(ed.remove_fill(fillSeed)){patternOpen=patternMenu=false;cursor=shipCursor;++patternRevision;saveDraft();}else patternError=ed.message;return;}
+            if(patternMenuIndex==10){if(applyPattern()){testFlight=true;game.geometry=editorGeometry();startGame();}return;}
+            if(patternMenuIndex==11){
+                std::ifstream f("/data/cssteroids-ps5/pattern-code.txt");std::stringstream buffer;buffer<<f.rdbuf();auto code=buffer.str();while(!code.empty() && (code.back()=='\n' || code.back()=='\r' || code.back()==' '))code.pop_back();
+                pattern::Tile tile;std::string error;
+                if(!f || !pattern::decode(code,tile,error)){patternError=error.empty()?"No pattern-code.txt to import":error;return;}
+                loadPatternTile(tile);patternDirty=true;patternError="CSP1 pattern imported";return;
+            }
+            std::string error;auto code=pattern::encode(currentTile(),error);
+            if(!error.empty()){patternError=error;return;}
+            mkdir("/data/cssteroids-ps5",0777);const std::string path="/data/cssteroids-ps5/pattern-code.txt",tmp=path+".tmp";
+            std::ofstream f(tmp,std::ios::trunc);f<<code<<"\n";bool written=bool(f.flush());f.close();
+            patternError=written && std::rename(tmp.c_str(),path.c_str())==0?"CSP1 exported to pattern-code.txt":"Could not export pattern code";
+            return;
+        }
+        const double step=fineGrid?fine:grid;
+        tileCursor.x+=pad.left_x*std::fabs(pad.left_x)*250*dt/tileZoom;tileCursor.y+=pad.left_y*std::fabs(pad.left_y)*250*dt/tileZoom;
+        if(pressed & PAD_LEFT)tileCursor.x=snap(tileCursor,step).x-step;
+        if(pressed & PAD_RIGHT)tileCursor.x=snap(tileCursor,step).x+step;
+        if(pressed & PAD_UP)tileCursor.y=snap(tileCursor,step).y-step;
+        if(pressed & PAD_DOWN)tileCursor.y=snap(tileCursor,step).y+step;
+        const double panLimit=200-200/tileZoom;
+        tilePan.x=std::clamp(tilePan.x+pad.right_x*200*dt,-panLimit,panLimit);tilePan.y=std::clamp(tilePan.y+pad.right_y*200*dt,-panLimit,panLimit);
+        if(pad.touch_count>0){if(lastTouchCount>0 && pad.touch_id==lastTouchId){tileCursor.x+=(pad.touch_x-lastTouchX)*.26/tileZoom;tileCursor.y+=(pad.touch_y-lastTouchY)*.26/tileZoom;}lastTouchX=pad.touch_x;lastTouchY=pad.touch_y;lastTouchId=pad.touch_id;}
+        lastTouchCount=pad.touch_count;tileCursor=clamp_canvas(tileCursor);
+        if(pressed & PAD_TOUCH_PAD){touchDown=true;patternPress();}
+        if(touchDown && !(pad.held & PAD_TOUCH_PAD)){touchDown=false;if(patternPending || patternGrabbing)patternPress();}
+        if(pressed & PAD_CROSS)patternPress();
+        if(pressed & PAD_CIRCLE){if(patternPending || patternGrabbing)patternPending=patternGrabbing=false;else patternMenu=true;}
+        if(pressed & PAD_OPTIONS)patternMenu=true;
+        if(pressed & PAD_SQUARE){if(tileEditor.undo()){++patternRevision;patternDirty=true;previewRevision=-1;}}
+        if(pressed & PAD_TRIANGLE){if(tileEditor.redo()){++patternRevision;patternDirty=true;previewRevision=-1;}}
+        if(pressed & PAD_L1){patternTool=(patternTool+3)%4;patternPending=patternGrabbing=false;}
+        if(pressed & PAD_R1){patternTool=(patternTool+1)%4;patternPending=patternGrabbing=false;}
+        const int n=int(palette.size())+1;
+        if(pad.r2>.6 && !patternR2){colorIndex=(colorIndex+1)%n;patternR2=true;}else if(pad.r2<.3)patternR2=false;
+        if(pad.l2>.6 && !patternL2){colorIndex=(colorIndex+n-1)%n;patternL2=true;}else if(pad.l2<.3)patternL2=false;
+        if(pressed & PAD_R3)tileEditor.mirrorOn=!tileEditor.mirrorOn;
+        if(pressed & PAD_L3)fineGrid=!fineGrid;
+    }
+    void drawPattern() {
+        using namespace cssteroids::editor;using hui::gfx::Color;
+        previewPattern();
+        text("SHIP / PATTERN / TEST",60,80,32,0x00ffff);text("PATTERN: "+activeTile.name,700,80,30,0xff80ff);
+        text("REPEATING TILE",80,155,26,0x00ffff);text("LIVE SHIP FILL",1000,155,26,0x00ffff);
+        const float left=80,top=200,size=720,viewLeft=1010,viewSize=700;
+        scene.rounded_rect({left,top,size,size},0,Color::rgb(0x050a12));scene.rounded_rect({viewLeft,top,viewSize,viewSize},0,Color::rgb(0x050a12));
+        auto x=[&](double x){return left+size/2+float((x-tilePan.x)*size/400*tileZoom);};
+        auto y=[&](double y){return top+size/2+float((y-tilePan.y)*size/400*tileZoom);};
+        pattern::Region viewport{{{left,top},{left+size,top},{left+size,top+size},{left,top+size}},{},{},size*size};
+        auto clipped=[&](Pt a,Pt b,float width,uint32_t color,float alpha=1){for(const auto &l:pattern::clip(Line{{x(a.x),y(a.y)},{x(b.x),y(b.y)},"white"},viewport))scene.line(float(l.a.x),float(l.a.y),float(l.b.x),float(l.b.y),width,Color::rgb(color,alpha));};
+        for(int i=0;i<=32;++i){double u=-200+i*12.5;clipped({u,-200},{u,200},1,0x3e6580,i%4==0?.5f:.2f);clipped({-200,u},{200,u},1,0x3e6580,i%4==0?.5f:.2f);}
+        for(const auto &l:tileEditor.ship.lines){auto pts=pattern::flatten(l);for(size_t i=1;i<pts.size();++i)clipped(pts[i-1],pts[i],float(l.width)*2,cssteroids::css_color(l.color));}
+        auto at=clamp_canvas(snap(tileCursor,fineGrid?fine:grid));
+        if(patternPending){clipped(tileStart,at,2,cssteroids::css_color(currentColor()),.8);if(tileEditor.mirrorOn)clipped(mirror(tileStart),mirror(at),2,cssteroids::css_color(currentColor()),.4);}
+        if(patternGrabbing)clipped(tileGrab,at,2,0x00ffff,.7);
+        if(x(at.x)>=left && x(at.x)<=left+size && y(at.y)>=top && y(at.y)<=top+size){scene.line(x(at.x)-10,y(at.y),x(at.x)+10,y(at.y),2,Color::rgb(0xffffff));scene.line(x(at.x),y(at.y)-10,x(at.x),y(at.y)+10,2,Color::rgb(0xffffff));}
+        auto sx=[&](double u){return viewLeft+viewSize/2+float(u*viewSize/400);};auto sy=[&](double u){return top+viewSize/2+float(u*viewSize/400);};
+        for(const auto &l:ed.ship.lines)if(l.meshGroup!=fillId || fillId.empty()){auto pts=pattern::flatten(l);for(size_t i=1;i<pts.size();++i)scene.line(sx(pts[i-1].x),sy(pts[i-1].y),sx(pts[i].x),sy(pts[i].y),float(l.width),Color::rgb(cssteroids::css_color(l.color),l.mesh?.45f:1.f));}
+        for(const auto &l:patternPreview)scene.line(sx(l.a.x),sy(l.a.y),sx(l.b.x),sy(l.b.y),float(l.width),Color::rgb(cssteroids::css_color(l.color)));
+        for(size_t i=0;i<fillRegion.points.size();++i){auto a=fillRegion.points[i],b=fillRegion.points[(i+1)%fillRegion.points.size()];scene.line(sx(a.x),sy(a.y),sx(b.x),sy(b.y),2,Color::rgb(0xff00ff,.6));}
+        if(tileZoom>1){scene.rounded_rect({820,760,150,150},0,Color::rgb(0x0b1827));for(const auto &l:tileEditor.ship.lines)scene.line(820+float(l.a.x+200)*.375f,760+float(l.a.y+200)*.375f,820+float(l.b.x+200)*.375f,760+float(l.b.y+200)*.375f,1,Color::rgb(cssteroids::css_color(l.color)));scene.ring(895+float(tilePan.x)*.375f,835+float(tilePan.y)*.375f,65/float(tileZoom),1,Color::rgb(0xffffff));}
+        char info[200];std::snprintf(info,sizeof info,"%s   %zu / 256 LINES   WIDTH %.0f   REPEAT %.2f   ZOOM %.0fx",tool_names[patternTool],tileEditor.ship.lines.size(),patternWidth,patternScale,tileZoom);
+        text(info,80,960,23,0x9fb3c8);
+        text("L1 R1 Tool   L2 R2 Colour   CROSS Place   SQUARE Undo   TRIANGLE Redo   R3 Mirror   L3 Fine",80,1000,19,0x8293ab);
+        text(patternError.empty()?"OPTIONS Apply / Presets / Scale / Library / Test     RIGHT STICK Pan     CIRCLE Cancel stroke / Menu":patternError,80,1040,19,patternError.empty()?0x8293ab:0xf0c07d);
+        if(patternMenu){
+            std::array<std::string,13> labels={"APPLY AND RETURN TO SHIP","CANCEL TILE CHANGES","PRESET: "+patternNames[patternPreset],"REPEAT SCALE (LEFT/RIGHT)","LINE WIDTH: "+std::to_string(int(patternWidth)),"ZOOM: "+std::to_string(int(tileZoom))+"x","RENAME PATTERN","SAVE TO LOCAL PATTERNS","LOAD NEXT LOCAL PATTERN","REMOVE THIS REGION'S FILL","APPLY AND TEST FLIGHT","IMPORT CSP1 FROM pattern-code.txt","EXPORT CSP1 TO pattern-code.txt"};
+            scene.rounded_rect({480,110,960,840},12,Color::rgb(0x08111f,.98));
+            for(int i=0;i<13;++i){if(i==patternMenuIndex)scene.rounded_rect({505,135+i*60.f,910,53},6,Color::rgb(0x124466));centered(labels[i],171+i*60.f,25,i==patternMenuIndex?0x00ffff:0x9fb3c8);}
+        }
+    }
     void editorPress() {   // CROSS or touchpad press
         using namespace cssteroids::editor;
         const Pt at = snapped();
@@ -782,6 +1096,7 @@ class VulkanExample : public ps5ui::KitExample {
             case Tool::paint: ok = ed.paint_near(cursor, currentColor()); break;
             case Tool::thruster: ok = ed.toggle_point(false, at); break;
             case Tool::weapon: ok = ed.toggle_point(true, at); break;
+            case Tool::fill: openPattern(at);return;
         }
         (void)ok;
     }
@@ -789,31 +1104,56 @@ class VulkanExample : public ps5ui::KitExample {
         if (tool == Tool::line && pending) editorPress();
         else if (tool == Tool::move && grabbing) editorPress();
     }
+    void saveDraft(float dt=0) {
+        if(screen!=Screen::editor && !nameForShip && !testFlight)return;
+        const int revision=ed.revision+patternRevision;
+        if(draftRevision==revision)return;
+        draftDelay+=dt;if(dt>0 && draftDelay<.5)return;
+        mkdir("/data/cssteroids-ps5",0777);
+        const std::string path="/data/cssteroids-ps5/editor-draft.json", tmp=path+".tmp";
+        std::ofstream f(tmp,std::ios::binary|std::ios::trunc);
+        cssteroids::json::Value draft;cssteroids::json::parse(cssteroids::editor::post_body(ed.ship,ed.passphrase,isPublic),draft);
+        if(patternOpen){auto pending=cssteroids::json::Value::object();pending.set("seed",cssteroids::editor::pattern::point(fillSeed));pending.set("tile",cssteroids::editor::pattern::tile_json(currentTile()));pending.set("scale",cssteroids::editor::pattern::number(patternScale));pending.set("fillId",cssteroids::json::Value::string_value(fillId));draft.set("patternDraft",pending);}
+        f<<cssteroids::json::dump(draft);
+        const bool written=bool(f.flush());f.close();
+        if(written && std::rename(tmp.c_str(),path.c_str())==0){draftRevision=revision;draftFailed=false;draftDelay=0;}
+        else {draftFailed=true;draftDelay=0;edStatus="Draft save failed: keep the editor open or save to server";}
+    }
     void saveShip(bool asNew) {
         using namespace cssteroids::editor;
+        if(saveRequest.pending()){edStatus="A save is already in progress";return;}
         if (!server.valid()) { edStatus = "Offline: cannot save to the server"; return; }
         if (const std::string why = ed.save_problem(); !why.empty()) { edStatus = "Cannot save yet: " + why; return; }
         const std::string pass = !asNew && ed.ownership == Ownership::owned ? ed.passphrase : std::string();
-        if (saveRequest.start(server, "POST", "/api/ships", post_body(ed.ship, pass, isPublic)))
+        cssteroids::json::Value snapshot;cssteroids::json::parse(post_body(ed.ship,{},isPublic),snapshot);snapshot.set("editorDocument",document(ed.ship));savedSnapshot=cssteroids::json::dump(snapshot);
+        if (saveRequest.start(server, pass.empty()?"POST":"PUT",pass.empty()?"/api/ships/editor":cssteroids::api::passphrase_path(pass),save_body(ed.ship,isPublic))) {
+            savedRevision=ed.revision;
             edStatus = pass.empty() ? "Saving a new ship ..." : "Updating " + pass + " ...";
+        }
     }
     void pollSave() {
         cssteroids::net::Response r;
         if (!saveRequest.take(r)) return;
         cssteroids::json::Value v; cssteroids::ShipDesign d;
-        if (r.ok() && cssteroids::json::parse(r.body, v) && cssteroids::parse_ship(v, d) && !d.passphrase.empty()) {
+        cssteroids::json::Value snapshot;
+        const bool parsed=r.ok() && cssteroids::json::parse(r.body,v) && !v.str("passphrase").empty() && cssteroids::json::parse(savedSnapshot,snapshot);
+        if(parsed){snapshot.set("passphrase",*v.get("passphrase"));if(v.get("id"))snapshot.set("id",*v.get("id"));if(v.get("isPublic"))snapshot.set("isPublic",*v.get("isPublic"));}
+        if (parsed && cssteroids::parse_ship(snapshot,d)) {
             ed.ownership = cssteroids::editor::Ownership::owned;
             ed.passphrase = d.passphrase;
             addOwned(d.passphrase);
-            useShip(d, true);
+            if(!testFlight)useShip(d, true);
+            else { ship=d;shipStore.save(d.source); }
+            draftRevision=-1;saveDraft();
             lastSavedPass = d.passphrase;
-            edStatus = "Saved. Passphrase: " + d.passphrase + "  (load it in the browser or on any PS5)";
+            edStatus = savedRevision==ed.revision ? "Saved. Passphrase: "+d.passphrase : "Snapshot saved; newer edits remain in the local draft. "+d.passphrase;
             say("PSteroid5 editor: saved \"%s\" as %s (%zu lines)", d.name.c_str(), d.passphrase.c_str(), ed.ship.lines.size());
         } else edStatus = "Save failed: " + describe(r);
     }
     void editorInput(const struct pad &pad, float dt) {
         using namespace cssteroids::editor;
         const uint32_t pressed = pad.pressed;
+        if(patternOpen){patternInput(pad,dt);return;}
         if (colorOpen) { // custom colour: D-pad up/down channel, left/right value, CROSS use, CIRCLE back
             unsigned rgb = unsigned(std::strtoul(customColor.c_str() + 1, nullptr, 16));
             int ch[3] = {int(rgb >> 16 & 255), int(rgb >> 8 & 255), int(rgb & 255)};
@@ -839,9 +1179,9 @@ class VulkanExample : public ps5ui::KitExample {
                 case 2:
                     if (const std::string why = ed.save_problem(); !why.empty() && why != "a name is required") { edStatus = "Cannot fly yet: " + why; break; }
                     testFlight = true; game.geometry = editorGeometry(); startGame(); break;
-                case 3: screen = Screen::name; nameForShip = true; nameDraft = ed.ship.name; nameCursor = 0; break;
+                case 3: screen = Screen::name; nameForPattern=false; nameForShip = true; nameDraft = ed.ship.name; nameCursor = 0; break;
                 case 4: colorOpen = true; break;
-                case 5: isPublic = !isPublic; edStatus = isPublic ? "Saved ships appear in the public gallery" : "Saved ships stay private (load them by passphrase)"; break;
+                case 5: isPublic = !isPublic; ed.revision++; edStatus="Visibility applies to new copies; updates keep existing visibility"; break;
                 case editor_menu_sound: {
                     using cssteroids::sound::shot_sounds;
                     const auto it = std::find(shot_sounds.begin(), shot_sounds.end(), cssteroids::sound::valid_shot(ed.ship.shotSound));
@@ -851,8 +1191,11 @@ class VulkanExample : public ps5ui::KitExample {
                     menuOpen = true; // stay on the item to hear the next one
                     break;
                 }
-                case 7: ed.clear(); break;
-                default: screen = Screen::title; game.geometry = ship.geometry; break;
+                case 7: openEditor(true); break;
+                case 8: ed.scale_ship(.9); break;
+                case 9: ed.scale_ship(1.1); break;
+                case 10: ed.clear(); break;
+                default: saveDraft(); screen = Screen::title; game.geometry = ship.geometry; break;
             }
             return;
         }
@@ -894,6 +1237,7 @@ class VulkanExample : public ps5ui::KitExample {
     void drawEditor() {
         using hui::gfx::Color;
         using namespace cssteroids::editor;
+        if(patternOpen){drawPattern();return;}
         const double now = wall_ms();
         // canvas, grid every 5 units (brighter every 25), mirror axis, front marker
         scene.rounded_rect({canvas_left, canvas_top, canvas_px, canvas_px}, 6, Color::rgb(0x050a12));
@@ -910,8 +1254,16 @@ class VulkanExample : public ps5ui::KitExample {
         for (size_t i = 0; i < ed.ship.lines.size(); i++) {
             const auto &l = ed.ship.lines[i];
             const uint32_t col = cssteroids::css_color(l.color);
-            scene.line(toScreenX(l.a.x), toScreenY(l.a.y), toScreenX(l.b.x), toScreenY(l.b.y), int(i) == hot ? 6.f : 3.f,
-                       Color::rgb(int(i) == hot ? (tool == Tool::erase ? 0xff4040 : cssteroids::css_color(currentColor())) : col));
+            const int steps=l.curved?16:1;
+            auto prev=l.a;
+            for(int j=1;j<=steps;++j) {
+                const double t=double(j)/steps,u=1-t;
+                const Pt next=l.curved?Pt{u*u*l.a.x+2*u*t*l.control.x+t*t*l.b.x,u*u*l.a.y+2*u*t*l.control.y+t*t*l.b.y}
+                                      :Pt{l.a.x+(l.b.x-l.a.x)*t,l.a.y+(l.b.y-l.a.y)*t};
+                scene.line(toScreenX(prev.x),toScreenY(prev.y),toScreenX(next.x),toScreenY(next.y),int(i)==hot?6.f:float(l.width)*1.5f,
+                           Color::rgb(int(i)==hot?(tool==Tool::erase?0xff4040:cssteroids::css_color(currentColor())):col));
+                prev=next;
+            }
             scene.circle(toScreenX(l.a.x), toScreenY(l.a.y), 3, Color::rgb(col)); scene.circle(toScreenX(l.b.x), toScreenY(l.b.y), 3, Color::rgb(col));
         }
         for (const auto &t : ed.ship.thrusters) { scene.ring(toScreenX(t.x), toScreenY(t.y), 10, 3, Color::rgb(0xffa500)); scene.line(toScreenX(t.x), toScreenY(t.y), toScreenX(t.x), toScreenY(t.y + 14), 4, Color::rgb(0xff6000, .8f)); }
@@ -926,49 +1278,60 @@ class VulkanExample : public ps5ui::KitExample {
         const float cx = toScreenX(at.x), cy = toScreenY(at.y);
         scene.line(cx - 14, cy, cx + 14, cy, 2, Color::rgb(0xffffff)); scene.line(cx, cy - 14, cx, cy + 14, 2, Color::rgb(0xffffff));
         if (ed.mirrorOn && at.x != 0) scene.ring(toScreenX(-at.x), cy, 6, 1.5f, Color::rgb(0x70caff, .6f));
-        // right panel
-        const float px = 1030;
+        // TV-safe rail, canvas and context inspector, adapted from the browser designer.
+        text("SHIP DESIGNER",60,80,36,0x00ffff);
+        text(ed.ship.name,380,80,30,0xffffff);
+        text("SHIP / PATTERN / TEST",1360,80,26,0xff00ff);
+        for(int i=0;i<tool_count;++i) {
+            const bool selected=int(tool)==i;
+            scene.rounded_rect({55,190+i*74.f,210,60},8,Color::rgb(selected?0x124466:0x091525));
+            if(selected)scene.rounded_rect({55,190+i*74.f,5,60},0,Color::rgb(0x00ffff));
+            text(tool_names[i],75,230+i*74.f,26,selected?0x00ffff:0x9fb3c8);
+        }
+        text("L1 / R1",75,770,22,0x8293ab);
+        text("Change tool",75,802,20,0x8293ab);
+        text("OPTIONS",75,865,22,0x00ffff);
+        text("Save / Scale",75,897,20,0x8293ab);
+        text("Test flight",75,929,20,0x8293ab);
+        // Rotation centre is fixed, independent of cursor and mirroring.
+        scene.ring(toScreenX(0),toScreenY(0),8,2,Color::rgb(0xff00ff));
+        scene.line(toScreenX(0)-12,toScreenY(0),toScreenX(0)+12,toScreenY(0),1,Color::rgb(0xff00ff));
+        scene.line(toScreenX(0),toScreenY(0)-12,toScreenX(0),toScreenY(0)+12,1,Color::rgb(0xff00ff));
+        const float px=1160;
         char line[160];
-        text("SHIP EDITOR", px, 190, 40);
-        text("\"" + ed.ship.name + "\"", px, 230, 24, 0x9fd3ff);
-        for (int i = 0; i < tool_count; i++) {
-            const bool on = int(tool) == i;
-            if (on) scene.rounded_rect({px - 8 + i * 135.f, 254, 128, 36}, 6, Color::rgb(0x2a4a6a));
-            text(tool_names[i], px + i * 135.f, 280, 20, on ? 0xffffff : 0x8293ab);
+        text("INSPECTOR",px,195,28,0x00ffff);
+        text(tool_names[int(tool)],px,238,32);
+        const char *help[]={"Place two endpoints to draw a hull line.","Pick a joint, then place its new position.",
+                            "Remove the highlighted line and its mirror.","Apply this colour to the highlighted line.",
+                            "Place up to three exhaust nozzles.","Place up to two weapon hardpoints.","Choose a closed hull region to design its pattern."};
+        text(help[int(tool)],px,280,20,0x9fb3c8);
+        for(int i=0;i<=int(palette.size());++i) {
+            const auto c=i<int(palette.size())?palette[size_t(i)]:customColor;
+            const float x=px+i*55.f;
+            if(i==colorIndex)scene.rounded_rect({x-4,306,44,44},8,Color::rgb(0xffffff));
+            scene.rounded_rect({x,310,36,36},6,Color::rgb(cssteroids::css_color(c)));
         }
-        for (int i = 0; i <= int(palette.size()); i++) {
-            const std::string c = i < int(palette.size()) ? palette[size_t(i)] : customColor;
-            const float x = px + i * 52.f;
-            if (i == colorIndex) scene.rounded_rect({x - 4, 306, 44, 44}, 8, Color::rgb(0xffffff));
-            scene.rounded_rect({x, 310, 36, 36}, 6, Color::rgb(cssteroids::css_color(c)));
-        }
-        text("custom", px + int(palette.size()) * 52.f - 4, 368, 14, 0x8293ab);
-        std::snprintf(line, sizeof line, "LINES %zu / 500    THRUSTERS %zu / 3    WEAPONS %zu / 2", ed.ship.lines.size(), ed.ship.thrusters.size(), ed.ship.weapons.size());
-        text(line, px, 410, 22, 0xc8d2dc);
-        std::snprintf(line, sizeof line, "MIRROR %s    GRID %s    %s", ed.mirrorOn ? "ON" : "OFF", fineGrid ? "FINE (1)" : "5", isPublic ? "PUBLIC" : "PRIVATE");
-        text(line, px, 442, 22, 0x83bed4);
-        // live truth: in-game size (1:1, flying), and a 3x view with the collision outline
-        scene.rounded_rect({px, 470, 360, 300}, 8, Color::rgb(0x0b1622));
-        text("IN GAME (actual size)", px + 12, 495, 16, 0x8293ab);
-        const auto &g = editorGeometry();
-        const float spin = float(now / 1400.0);
-        drawShip(g, px + 180, 630, spin, 1, true);
-        for (const auto &w : g.weapons.empty() ? std::vector<cssteroids::Point>{{0, -15}} : g.weapons) { // firing directions
-            const float c = std::cos(spin), sn = std::sin(spin), bx = px + 180 + (w.x * c - w.y * sn), by = 630 + (w.x * sn + w.y * c);
-            scene.line(bx, by, bx + std::sin(spin) * 60, by - std::cos(spin) * 60, 1, Color::rgb(0xff4500, .5f));
-        }
-        scene.rounded_rect({px + 380, 470, 420, 300}, 8, Color::rgb(0x0b1622));
-        text("3x  COLLISION OUTLINE", px + 392, 495, 16, 0x8293ab);
-        for (const auto &w : cssteroids::ship_segments(g, px + 590, 630, 0, 3)) scene.line(float(w.x1), float(w.y1), float(w.x2), float(w.y2), 2, Color::rgb(0x70e8a0));
-        scene.ring(px + 590, 630, 15 * 3, 1, Color::rgb(0x70e8a0, .35f)); // centre fallback circle
-        // help and messages
-        text("STICK / TOUCHPAD  Cursor    D-PAD  Step    CROSS  Place    L1 R1  Tool    L2 R2  Colour", px, 830, 18, 0x8293ab);
-        text("SQUARE  Undo    TRIANGLE  Redo    R3  Mirror    L3  Fine grid    OPTIONS  Menu", px, 858, 18, 0x8293ab);
-        text("Touchpad: slide to move, press-and-hold to drag a line or point", px, 886, 18, 0x8293ab);
-        if (!ed.message.empty()) text(ed.message, px, 930, 22, 0xf0c07d);
-        if (saveRequest.pending()) text("Saving ...", px, 965, 22, 0x83bed4);
-        text(edStatus, canvas_left, 1050, 20, 0x83bed4);
-        if (!lastSavedPass.empty()) { text("PASSPHRASE", px, 1000, 18, 0xffd700); text(lastSavedPass, px + 140, 1000, 26, 0xffd700); }
+        text("L2 / R2  Colour     OPTIONS  Custom RGB",px,384,20,0x8293ab);
+        std::snprintf(line,sizeof line,"LINES %zu / 5000    THRUST %zu / 3    WEAPONS %zu / 2",ed.ship.lines.size(),ed.ship.thrusters.size(),ed.ship.weapons.size());
+        text(line,px,422,20,0xc8d2dc);
+        std::snprintf(line,sizeof line,"MIRROR %s    GRID %s    %s",ed.mirrorOn?"ON":"OFF",fineGrid?"FINE (1)":"5",isPublic?"PUBLIC":"PRIVATE");
+        text(line,px,456,20,0x83bed4);
+        const auto &g=editorGeometry();
+        scene.rounded_rect({px,485,300,240},8,Color::rgb(0x091525));
+        text("ACTUAL FLIGHT SIZE",px+12,515,18,0x8293ab);
+        drawShip(g,px+150,620,float(now/1400.0),1,true);
+        scene.rounded_rect({px+320,485,320,240},8,Color::rgb(0x091525));
+        text("3x  HULL / PATTERN",px+332,515,18,0x8293ab);
+        for(const auto &w:cssteroids::ship_segments(g,px+480,620,0,3))
+            scene.line(float(w.x1),float(w.y1),float(w.x2),float(w.y2),w.width,Color::rgb(w.color));
+        text("MAGENTA  Rotation centre",px,768,20,0xff80ff);
+        text("STICK / TOUCHPAD  Cursor    D-PAD  Step",px,810,20,0x8293ab);
+        text("CROSS  Place    SQUARE  Undo    TRIANGLE  Redo",px,844,20,0x8293ab);
+        text("R3  Mirror    L3  Fine grid    OPTIONS  Save / Test",px,878,20,0x8293ab);
+        text("Touchpad: hold press to drag a line or point",px,912,20,0x8293ab);
+        text(ed.ship.lines.size()>2000?"Heavy design: online play sheds pattern lines first":ed.message,px,954,20,0xf0c07d);
+        text(saveRequest.pending()?"SAVING TO SERVER...":draftFailed?"LOCAL DRAFT FAILED":draftRevision==ed.revision?"OPTIONS  Restore local draft":"LOCAL DRAFT PENDING",px,992,18,draftFailed?0xff4040:0x70e8a0);
+        text(edStatus,60,1045,18,0x83bed4);
         // menus
         if (menuOpen) {
             scene.rounded_rect({620, 230, 680, 80 + editor_menu_count * 52.f}, 12, Color::rgb(0x08111f, .96f));
@@ -1003,7 +1366,7 @@ class VulkanExample : public ps5ui::KitExample {
     // --- input --------------------------------------------------------------
     void startGame() {
         screen = Screen::game; paused = false; quitMenu = false; savedRun = false; submitted = false; submitStatus.clear();
-        game.reset();
+        game.reset(); ownTrail.clear(); remoteTrails.clear(); accumulator=0;
     }
     void titleInput(uint32_t pressed) {
         if (pressed & PAD_UP) menu = (menu + menu_count - 1) % menu_count;
@@ -1021,7 +1384,7 @@ class VulkanExample : public ps5ui::KitExample {
             case 2: startMmo(); break;
             case 3: screen = Screen::hangar; if (gallery.empty()) requestGallery(); break;
             case 4: openEditor(); break;
-            case 5: screen = Screen::name; nameForShip = false; nameDraft = pilot; nameCursor = 0; break;
+            case 5: screen = Screen::name; nameForPattern=false; nameForShip = false; nameDraft = pilot; nameCursor = 0; break;
             default: requestScores(); break;
         }
     }
@@ -1055,9 +1418,10 @@ class VulkanExample : public ps5ui::KitExample {
         if (pressed & PAD_DOWN) nameCursor = (nameCursor + name_columns) % n;
         if ((pressed & PAD_CROSS) && int(nameDraft.size()) < name_max) nameDraft += name_chars[size_t(nameCursor)];
         if ((pressed & PAD_SQUARE) && !nameDraft.empty()) nameDraft.pop_back();
-        if (pressed & PAD_CIRCLE) screen = nameForShip ? Screen::editor : Screen::title;
+        if (pressed & PAD_CIRCLE) {screen = (nameForShip || nameForPattern) ? Screen::editor : Screen::title;nameForPattern=false;}
         if (pressed & PAD_OPTIONS) {
             while (!nameDraft.empty() && nameDraft.back() == ' ') nameDraft.pop_back();
+            if(nameForPattern){if(!nameDraft.empty()){activeTile.name=nameDraft;++patternRevision;}nameForPattern=false;screen=Screen::editor;return;}
             if (nameForShip) { if (!nameDraft.empty()) ed.set_name(nameDraft); screen = Screen::editor; return; }
             if (!nameDraft.empty()) { pilot = nameDraft; savePilot(); }
             screen = Screen::title;
@@ -1145,12 +1509,13 @@ public:
         // the player's own thrusters, while the ship is flying
         sfx.set_thrust(!intercepted && ((screen == Screen::game && !paused && !game.over && game.ship.thrusting && !game.ship.exploding) ||
                                         (screen == Screen::multiplayer && mp.phase == cssteroids::mmo::Phase::playing && mp.thrusting && !mp.dead)));
+        updateSpace(dt,intercepted);
+        if(screen==Screen::editor)saveDraft(dt);
         if (game.over && !savedRun) { if (!testFlight) scores.record(game.score); savedRun = true; } // test flights do not count
 
         scene.clear();
         using hui::gfx::Color;
-        for (int i = 0; i < 140; i++)
-            scene.circle(float((i * 811 + 137) % 1920), float((i * 373 + 71) % 1080), i % 7 == 0 ? 1.6f : .8f, Color::rgb(0xffffff, .25f + (i % 5) * .1f));
+        drawStars();
         switch (screen) {
             case Screen::title: drawTitle(); break;
             case Screen::hangar: drawHangar(); break;

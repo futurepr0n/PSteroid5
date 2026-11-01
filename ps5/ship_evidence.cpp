@@ -88,6 +88,16 @@ int main(int argc, char **argv) {
     json::Value corpus; CHECK(json::parse(ss.str(), corpus));
     json::Value out = json::Value::object(), list; list.type = json::Value::Type::array;
 
+    // Curves, widths and pattern-only decoration judged against the actual browser.
+    for(int i=0;i<8;++i) {
+        editor::Ship ship;ship.name="Designer parity";
+        editor::Line hull{{-100,-60},{100,100},"#00ffff"};
+        hull.curved=true;hull.control={double(i*20-70),-150};hull.width=i%2+1;
+        ship.lines.push_back(hull);
+        editor::Line pattern{{-100,170},{100,170},"#ff00ff"};pattern.mesh=true;pattern.meshGroup="fill-1";
+        ship.lines.push_back(pattern);
+        list.items.push_back(entry("designer",ship.name,post_body(ship,{},false),9000+i));
+    }
     // 1. property test: random editor sessions never leave the valid space
     int produced = 0, steps = 0, refused = 0;
     for (int seed = 1; seed <= sessions; seed++) {

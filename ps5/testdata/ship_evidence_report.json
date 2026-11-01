@@ -11,13 +11,18 @@
   "rebuilt": 32,
   "worstShiftUnits": 3.4104493180197313
  },
- "judged": 450,
- "segmentsMatched": 24507,
- "endpointDotsMatched": 49014,
- "flameAnchorsMatched": 3543,
- "collisionSamplesMatched": 162000,
+ "judged": 458,
+ "segmentsMatched": 24915,
+ "endpointDotsMatched": 49110,
+ "flameAnchorsMatched": 3591,
+ "collisionSamplesMatched": 164880,
  "collisionTiesSkipped": 0,
  "byKind": {
+  "designer": {
+   "ships": 8,
+   "serverAccepts": 8,
+   "browserIdentical": 8
+  },
   "property": {
    "ships": 384,
    "serverAccepts": 384,

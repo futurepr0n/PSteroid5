@@ -1,7 +1,7 @@
 # PSteroid5 — native PS5 port of CSSteroids
 
 Title **PPSA77305**, content ID `UP9000-PPSA77305_00-PSTEROID5PS50000`, version
-01.000.000. A native C++ folder title of the CSSteroids-2 browser game built with
+01.004.000. A native C++ folder title of the CSSteroids-2 browser game built with
 the workspace's PayloadSDK/Vulkan toolchain (see `../../PS5-PORTING-HANDBOOK.md`).
 Plan: `../docs/plans/2026-10-23-ps5-native-port.md`.
 
@@ -30,7 +30,7 @@ Plan: `../docs/plans/2026-10-23-ps5-native-port.md`.
 - Multiplayer: MMO (drop-in shared world) and MULTIPLAYER (two-pilot co-op rooms).
 - Power-ups, as the browser: extra life, rapid, spray and a 30 s shield, dropped by bullet
   kills in single player, co-op and MMO (server-authoritative there), picked up on contact.
-- Not yet: enemies in single-player, audio.
+- Not yet: enemies in single-player.
 - Deliberate difference: the browser loses a life from both a timer and the
   explosion update; this port deducts exactly one life per hit.
 
@@ -83,3 +83,71 @@ and Windows copies. Output: `dist/PPSA77305/` (git-ignored). Staging:
 
 Smoke test: put a positive frame count in `smoke-test.txt` beside eboot.bin; the
 title auto-plays that many frames and writes `smoke-test.ppm`.
+
+## 01.003.000 visual/designer update
+
+The designer now has a neon vertical tool rail, contextual inspector, fixed magenta
+rotation centre, and readable controller hints. OPTIONS includes whole-ship 90% /
+110% scale (undoable, including curve controls and hardpoints) and RESTORE LOCAL
+DRAFT. Completed changes autosave after half a second to
+`/data/cssteroids-ps5/editor-draft.json`; opening the editor starts from the Hangar
+selection, and restoring a draft is explicit. Exit flushes the completed edit.
+
+Imported ships retain curve controls, 1/2 line widths, multicolour artwork and baked
+pattern lines, up to 5,000 lines locally. Curves render/collide as 16 segments;
+pattern decoration is excluded from hull collisions (unless no hull exists).
+Online payloads follow the browser's 2,000-line rule: shed pattern lines first,
+then use the default shape if the hull alone exceeds that limit. Browser designs
+with an editorDocument save as PS5 copies, preserving their original editable
+pattern recipes. Full pattern creation and curve bending are not added here.
+
+All flight modes, including test flight, have three velocity-driven parallax star
+layers, tinted twinkling pulsars and occasional arcing shooting stars. Local and
+remote pilots emit short trails using their nozzle/hull colours and palette
+accents: pixels normally, ribbons with rapid fire, embers with spray. Rapid takes
+precedence when both are active. Shield retains its existing bubble. Effects use
+bounded pools and an independent fixed 60 Hz visual update; this is not a claim
+of measured console frame rate. HUI renders soft embers/ribbons with layered
+alpha geometry rather than the browser's canvas additive blend.
+
+Deploy after building: `python tools/deploy-ps5.py --publish` backs up the existing
+USB title, stages and reads back every file, then switches the title with metadata
+last. The old remote folder stays outside the scan path for rollback. A mounted
+title blocks deployment. Override host/port when needed. Console launch/gameplay
+verification is separate from package validation and transfer.
+
+## 01.004.000: pattern authoring
+
+Select FILL with L1/R1, put the cursor inside a closed hull region, and press CROSS.
+The pattern step shows a freeform repeating tile and a live ship preview. Nested
+closed hulls become holes; crossing hull lines divide separate fill regions.
+
+In the tile: left stick/touchpad moves the cursor, CROSS places stroke endpoints,
+L1/R1 chooses LINE/MOVE/ERASE/PAINT, L2/R2 chooses colour, SQUARE/TRIANGLE undo/redo,
+R3 toggles mirror, L3 toggles fine steps, and right stick pans when zoomed.
+OPTIONS opens Apply, Cancel, six presets (grid, hex, triangle, diamond, ribs,
+crosshatch), blank artwork, repeat scale, stroke width, zoom/fit, naming, local
+library, remove fill, and apply/test flight. Use LEFT/RIGHT on preset/scale items.
+Applying is one ship undo step. Hull edits refit linked fills; opening their boundary
+removes their artwork and recipe together, and undo restores both.
+
+Pattern tiles support up to 256 lines, 2?16 unit square imported tiles, individual
+colours and widths, and imported curves. The ship's 5,000-line budget and generation
+work budget reject dense edits without changing the previous design. Region
+finding caps the hull at 2,048 flattened edges and reports an explicit error.
+
+The local pattern library lives in `/data/cssteroids-ps5/pattern-library.json`.
+Pattern codes use the browser's CSP1 format, including its 4,096-character cap.
+Import/export reads/writes `/data/cssteroids-ps5/pattern-code.txt`; transfer that
+text file with the existing FTP setup. Dense artwork can exceed the code cap while
+still being usable in local ships and the local library.
+
+Local drafts retain pending tile artwork, selected region, repeat scale and linked
+fill. RESTORE LOCAL DRAFT reopens that work; Cancel explicitly discards the pending
+tile changes. Online saves now use the versioned editor endpoints and retain fill
+recipes and stable line IDs. Owned ships update through PUT by passphrase; gallery
+ships save as copies. The browser can reopen the full editable document. Existing
+visibility is preserved on update; the visibility choice applies to new copies.
+This supersedes the 01.003.000 restriction that browser documents save as copies.
+The reference's cloud pattern library is test-database-only; this port uses a local
+library and CSP1 exchange without changing the server or its database.

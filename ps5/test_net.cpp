@@ -4,6 +4,7 @@
 #include "net_http.hpp"
 #include "server_api.hpp"
 #include "ship_design.hpp"
+#include "ship_editor.hpp"
 #include <cstdio>
 
 using namespace cssteroids;
@@ -124,6 +125,19 @@ int main(int argc, char **argv) {
         const std::string body = api::high_score_body("PS5", 4200, "default", "white");
         r = net::request(e, "POST", api::high_scores_path, body);
         CHECK(r.status == 201 && r.body == body);
+        // Editor endpoints return a receipt, while GET restores the full editable document.
+        editor::Ship design;design.name="Pattern round trip";
+        design.lines={{{-50,-50},{50,-50},"cyan"},{{50,-50},{50,50},"cyan"},{{50,50},{-50,50},"cyan"},{{-50,50},{-50,-50},"cyan"}};
+        editor::Editor model(design);CHECK(model.apply_fill({0,0},editor::pattern::preset("grid"),5));
+        r=net::request(e,"POST","/api/ships/editor",editor::save_body(model.ship,false));
+        json::Value receipt;CHECK(r.status==201 && json::parse(r.body,receipt) && receipt.str("passphrase")=="swift-hawk-diving");
+        model.ship.name="Updated pattern";
+        r=net::request(e,"PUT",api::passphrase_path("swift-hawk-diving"),editor::save_body(model.ship,true));
+        CHECK(r.status==200 && json::parse(r.body,receipt) && !receipt.get("isPublic")->b);
+        r=net::request(e,"GET",api::passphrase_path("swift-hawk-diving"));
+        json::Value stored;editor::Ship restored;
+        CHECK(r.ok() && json::parse(r.body,stored) && editor::from_server(stored,restored));
+        CHECK(restored.name=="Updated pattern" && restored.fills.size()==1 && restored.fills[0].tile.lines.size()>0);
         net::AsyncRequest async;
         CHECK(async.start(e, "GET", api::high_scores_path));
         net::Response got;

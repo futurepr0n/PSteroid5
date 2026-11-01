@@ -9,7 +9,7 @@
 #include <vector>
 
 namespace cssteroids {
-struct WorldSeg { double x1, y1, x2, y2; uint32_t color; };
+struct WorldSeg { double x1, y1, x2, y2; uint32_t color; float width = 2; };
 
 // ctx.translate(x, y); ctx.rotate(angle); then ship-space points, scaled for display.
 inline std::vector<WorldSeg> ship_segments(const ShipGeometry &g, double x, double y, double angle, double scale = 1) {
@@ -20,7 +20,13 @@ inline std::vector<WorldSeg> ship_segments(const ShipGeometry &g, double x, doub
         WorldSeg w; at(x1, y1, w.x1, w.y1); at(x2, y2, w.x2, w.y2); w.color = color; out.push_back(w);
     };
     if (g.custom()) {
-        for (const auto &l : g.lines) seg(l.x1, l.y1, l.x2, l.y2, l.color);
+        for (const auto &l : g.lines) {
+            Point a{l.x1,l.y1}; const int steps=l.curved?16:1;
+            for(int i=1;i<=steps;++i) {
+                const auto b=segment_at(l,double(i)/steps);
+                seg(a.x,a.y,b.x,b.y,l.color);out.back().width=l.width;a=b;
+            }
+        }
     } else if (g.shape == ShipShape::triangle) {
         seg(0, -r, -r, r, g.color); seg(-r, r, r, r, g.color); seg(r, r, 0, -r, g.color);
     } else if (g.shape == ShipShape::diamond) {

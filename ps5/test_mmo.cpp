@@ -410,6 +410,17 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc < 2) { std::puts("usage: test-mmo world_vectors.json [server] | test-mmo fresh <server> <phase>..."); return 2; }
+    { // New designer style/curve fields survive the actual multiplayer payload path.
+        ShipDesign d; d.typeName="custom";d.geometry.shape=ShipShape::custom;
+        Segment l{0,0,20,30,0xff00ff};l.width=1;l.curved=true;l.cx=50;l.cy=60;l.mesh=true;
+        d.geometry.lines.push_back(l);
+        auto remote=geometry_from(ship_payload(d));
+        CHECK(remote.lines.size()==1 && remote.lines[0].width==1 && remote.lines[0].curved && remote.lines[0].cx==50 && remote.lines[0].mesh);
+        d.geometry.lines.resize(2100,l);d.geometry.lines[0].mesh=false;
+        auto reduced=ship_payload(d);CHECK(reduced.get("customLines")->items.size()==1 && reduced.str("shipType")=="custom");
+        for(auto &line:d.geometry.lines)line.mesh=false;
+        CHECK(ship_payload(d).str("shipType")=="default");
+    }
     golden(argv[1]);
     offline();
     coop_offline();

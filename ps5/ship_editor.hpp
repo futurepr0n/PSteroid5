@@ -4,6 +4,8 @@
 // Every edit goes through apply(), which refuses anything the server would reject, so the
 // editor cannot produce an invalid ship. Portable and host-tested.
 #include "json_lite.hpp"
+#include "pattern_design.hpp"
+#include "ship_design.hpp"
 #include "sound.hpp"
 #include <algorithm>
 #include <cmath>
@@ -14,13 +16,9 @@
 namespace cssteroids::editor {
 constexpr double half = 200;          // canvas half-size (±200 design units)
 constexpr double grid = 5, fine = 1;  // 5 units = 1.25 px in game
-constexpr size_t max_lines = 500, max_thrusters = 3, max_weapons = 2, max_name = 32, max_undo = 200;
+constexpr size_t max_lines = 5000, max_thrusters = 3, max_weapons = 2, max_name = 32, max_undo = 200;
 constexpr double snap_radius = 6;     // endpoints this close are treated as one
 constexpr double pick_radius = 10;    // cursor reach for picking lines/points
-
-struct Pt { double x = 0, y = 0; };
-inline bool same_pt(Pt a, Pt b, double eps = 1e-9) { return std::fabs(a.x - b.x) <= eps && std::fabs(a.y - b.y) <= eps; }
-struct Line { Pt a, b; std::string color; };
 
 // The browser's preset swatches (index.html .color-option) as the hex it stores per line.
 inline const std::vector<std::string> palette = {"#ffffff", "#00ffff", "#00ff00", "#ffff00", "#ff9900", "#ff00ff", "#ff0000", "#0066ff"};
@@ -30,11 +28,14 @@ struct Ship {
     std::vector<Line> lines;
     std::vector<Pt> thrusters, weapons;
     std::string shotSound = "pew"; // the player's own shots (pew, zap, laser, arcade)
+    std::vector<pattern::Fill> fills{};
 };
+
+inline std::string post_body(const Ship &,const std::string &,bool);
 
 enum class Ownership { fresh, owned, copy }; // copy: from the gallery, saved without its passphrase
 
-inline bool inside(Pt p) { return std::isfinite(p.x) && std::isfinite(p.y) && std::fabs(p.x) <= half && std::fabs(p.y) <= half; }
+inline bool inside(Pt p) { return std::isfinite(p.x) && std::isfinite(p.y) && std::fabs(p.x) <= half+1e-7 && std::fabs(p.y) <= half+1e-7; }
 inline Pt mirror(Pt p) { return {p.x == 0 ? 0 : -p.x, p.y}; }
 inline Pt snap(Pt p, double step) { return {std::round(p.x / step) * step, std::round(p.y / step) * step}; }
 inline Pt clamp_canvas(Pt p) { return {std::clamp(p.x, -half, half), std::clamp(p.y, -half, half)}; }
@@ -47,22 +48,26 @@ inline std::string invalid_reason(const Ship &s, bool canvas = true) {
     if (n.empty()) return "a name is required";
     if (s.name.size() > max_name) return "name longer than 32";
     if (s.lines.empty()) return "draw at least one line";
-    if (s.lines.size() > max_lines) return "more than 500 lines";
+    if (s.fills.size()>200) return "more than 200 pattern fills";
+    if (s.lines.size() > max_lines) return "more than 5000 lines";
     if (s.thrusters.size() > max_thrusters) return "more than 3 thrusters";
     if (s.weapons.size() > max_weapons) return "more than 2 weapons";
     for (const auto &l : s.lines) {
         if (l.color.size() > max_name) return "colour name longer than 32";
-        if (canvas && (!inside(l.a) || !inside(l.b))) return "a line leaves the canvas";
+        if (l.width != 1 && l.width != 2) return "line width must be 1 or 2";
+        if (l.curved && (!std::isfinite(l.control.x) || !std::isfinite(l.control.y))) return "invalid curve";
+        if (canvas && (!inside(l.a) || !inside(l.b) || (l.curved && !inside(l.control)))) return "a line leaves the canvas";
         if (!std::isfinite(l.a.x + l.a.y + l.b.x + l.b.y)) return "a point is not a number";
     }
     if (canvas) {
         for (const auto &p : s.thrusters) if (!inside(p)) return "a thruster leaves the canvas";
         for (const auto &p : s.weapons) if (!inside(p)) return "a weapon leaves the canvas";
     }
+    if(post_body(s,{},false).size()>1900000)return "Editor document too large; simplify pattern artwork";
     return {};
 }
 inline bool within_canvas(const Ship &s) {
-    for (const auto &l : s.lines) if (!inside(l.a) || !inside(l.b)) return false;
+    for (const auto &l : s.lines) if (!inside(l.a) || !inside(l.b) || (l.curved && !inside(l.control))) return false;
     for (const auto &p : s.thrusters) if (!inside(p)) return false;
     for (const auto &p : s.weapons) if (!inside(p)) return false;
     return true;
@@ -90,7 +95,7 @@ public:
     int revision = 0; // bumps on every change (for cached previews)
 
     explicit Editor(Ship s = {}, Ownership o = Ownership::fresh, std::string pass = {})
-        : ship(std::move(s)), ownership(o), passphrase(std::move(pass)), legacyOutside(!within_canvas(ship)) {}
+        : ship(std::move(s)), ownership(o), passphrase(std::move(pass)), legacyOutside(!within_canvas(ship)) { ensure_ids(ship); }
 
     bool can_undo() const { return !undoStack.empty(); }
     bool can_redo() const { return !redoStack.empty(); }
@@ -102,11 +107,11 @@ public:
     // --- edits (each one undoable; false + message when refused) -------------
     // a == b makes a dot: the browser stores a click without a drag the same way (3% of
     // gallery lines) and draws it as the endpoint dots of a zero-length line.
-    bool add_line(Pt a, Pt b, const std::string &color) {
+    bool add_line(Pt a, Pt b, const std::string &color, double width=2) {
         Ship next = ship;
-        next.lines.push_back({a, b, color});
+        next.lines.push_back({a, b, color});next.lines.back().width=width;
         if (mirrorOn) {
-            Line m{mirror(a), mirror(b), color};
+            Line m{mirror(a), mirror(b), color};m.width=width;
             if (!line_exists(next, m)) next.lines.push_back(m);
         }
         return commit(std::move(next));
@@ -115,19 +120,21 @@ public:
     bool erase_near(Pt c) {
         const int i = nearest_line(c);
         if (i < 0) return refuse("no line here");
+        if(ship.lines[size_t(i)].mesh)return refuse("Use FILL to edit or remove pattern artwork");
         Ship next = ship;
         const Line gone = next.lines[size_t(i)];
         next.lines.erase(next.lines.begin() + i);
         if (mirrorOn) erase_line(next, {mirror(gone.a), mirror(gone.b), gone.color});
         return commit(std::move(next));
     }
-    bool paint_near(Pt c, const std::string &color) {
+    bool paint_near(Pt c, const std::string &color, double width=0) {
         const int i = nearest_line(c);
         if (i < 0) return refuse("no line here");
+        if(ship.lines[size_t(i)].mesh)return refuse("Use FILL to edit or remove pattern artwork");
         Ship next = ship;
         const Line was = next.lines[size_t(i)];
-        next.lines[size_t(i)].color = color;
-        if (mirrorOn) for (auto &l : next.lines) if (same_line(l, {mirror(was.a), mirror(was.b), was.color})) l.color = color;
+        next.lines[size_t(i)].color = color;if(width>0)next.lines[size_t(i)].width=width;
+        if (mirrorOn) for (auto &l : next.lines) if (same_line(l, {mirror(was.a), mirror(was.b), was.color})) {l.color = color;if(width>0)l.width=width;}
         return commit(std::move(next));
     }
     // Move every endpoint at `from` (and its mirror) to `to`: the whole joint moves.
@@ -171,13 +178,52 @@ public:
         return commit(std::move(next));
     }
     bool set_ship_color(const std::string &color) { Ship next = ship; next.color = color; return commit(std::move(next)); }
-    bool clear() { Ship next = ship; next.lines.clear(); next.thrusters.clear(); next.weapons.clear(); return commit(std::move(next)); }
+    bool scale_ship(double factor) {
+        if(!std::isfinite(factor) || factor < .1 || factor > 3) return refuse("scale must be 10 to 300 percent");
+        Ship next=ship;
+        auto scale=[&](Pt &p){p.x*=factor;p.y*=factor;};
+        for(auto &l:next.lines){scale(l.a);scale(l.b);if(l.curved)scale(l.control);}
+        for(auto *pts:{&next.thrusters,&next.weapons})for(auto &p:*pts)scale(p);
+        for(auto &f:next.fills){scale(f.seed);f.scale*=factor;if(f.scale<.05 || f.scale>10000)return refuse("Pattern scale would leave valid range");}
+        return commit(std::move(next));
+    }
+    bool apply_fill(Pt seed,const pattern::Tile &tile,double scale,const std::string &replace={}) {
+        Ship next=ship;ensure_ids(next);std::string error;auto rs=pattern::regions(next.lines,error);
+        if(!error.empty()){message=error;return false;}
+        const auto *area=pattern::region_at(rs,seed);if(!area)return refuse("Choose a closed hull region (gaps must be joined)");
+        std::string id=replace;
+        if(id.empty())for(const auto &f:next.fills)if(pattern::match(rs,f)==area){id=f.id;break;}
+        if(id.empty()) {size_t n=1;do{id="ps5-fill-"+std::to_string(n++);}while(std::any_of(next.fills.begin(),next.fills.end(),[&](const auto &f){return f.id==id;}));}
+        pattern::Fill f;f.id=id;f.boundary=area->boundary;f.seed=seed;f.tile=tile;f.scale=scale;f.color=tile.color;f.width=tile.width;
+        auto generated=pattern::bake(*area,f,error);if(!error.empty()){message=error;return false;}
+        if(generated.empty())return refuse("Draw pattern artwork before applying");
+        std::erase_if(next.lines,[&](const auto &l){return l.meshGroup==id;});
+        std::erase_if(next.fills,[&](const auto &old){return old.id==id;});
+        next.lines.insert(next.lines.end(),generated.begin(),generated.end());next.fills.push_back(f);
+        return commit(std::move(next));
+    }
+    bool remove_fill(Pt seed) {
+        Ship next=ship;std::string error;auto rs=pattern::regions(next.lines,error);const auto *r=pattern::region_at(rs,seed);
+        if(!r)return refuse("Choose a patterned closed region");
+        auto f=std::find_if(next.fills.begin(),next.fills.end(),[&](const auto &f){return pattern::match(rs,f)==r;});
+        if(f==next.fills.end())return refuse("No editable fill here");
+        auto id=f->id;next.fills.erase(f);std::erase_if(next.lines,[&](const auto &l){return l.meshGroup==id;});return commit(std::move(next));
+    }
+    bool clear() { Ship next = ship; next.lines.clear(); next.thrusters.clear(); next.weapons.clear(); next.fills.clear(); return commit(std::move(next)); }
 
     // --- queries ------------------------------------------------------------
     int nearest_line(Pt c, double reach = pick_radius) const {
         int best = -1; double bd = reach;
         for (size_t i = 0; i < ship.lines.size(); i++) {
-            const double d = seg_dist(c, ship.lines[i].a, ship.lines[i].b);
+            const auto &l=ship.lines[i];
+            if(l.mesh)continue;
+            double d=seg_dist(c,l.a,l.b);
+            if(l.curved) {
+                d=1e30;Pt a=l.a;
+                for(int j=1;j<=16;++j){const double t=double(j)/16,u=1-t;
+                    Pt b{u*u*l.a.x+2*u*t*l.control.x+t*t*l.b.x,u*u*l.a.y+2*u*t*l.control.y+t*t*l.b.y};
+                    d=std::min(d,seg_dist(c,a,b));a=b;}
+            }
             if (d <= bd) { bd = d; best = int(i); }
         }
         return best;
@@ -186,7 +232,7 @@ public:
     bool nearest_vertex(Pt c, Pt &out, double reach = snap_radius) const {
         double bd = reach; bool found = false;
         auto consider = [&](Pt p) { const double d = std::hypot(p.x - c.x, p.y - c.y); if (d <= bd) { bd = d; out = p; found = true; } };
-        for (const auto &l : ship.lines) { consider(l.a); consider(l.b); }
+        for (const auto &l : ship.lines) if(!l.mesh) { consider(l.a); consider(l.b); }
         for (const auto &p : ship.thrusters) consider(p);
         for (const auto &p : ship.weapons) consider(p);
         return found;
@@ -196,7 +242,24 @@ private:
     std::vector<Ship> undoStack, redoStack;
 
     bool refuse(const char *why) { message = why; return false; }
+    static void ensure_ids(Ship &s) {
+        std::set<std::string> used;for(const auto &l:s.lines)if(!l.id.empty())used.insert(l.id);
+        size_t i=1;for(auto &l:s.lines)if(l.id.empty()){std::string id;do{id="ps5-line-"+std::to_string(i++);}while(used.count(id));l.id=id;used.insert(id);}
+    }
     bool commit(Ship next) {
+        ensure_ids(next);
+        if(!next.fills.empty()) {
+            std::string error;auto rs=pattern::regions(next.lines,error);if(!error.empty()){message=error;return false;}
+            std::set<std::string> groups;for(const auto &f:next.fills)groups.insert(f.id);
+            std::erase_if(next.lines,[&](const auto &l){return groups.count(l.meshGroup)>0;});
+            std::vector<pattern::Fill> active;
+            for(auto f:next.fills)if(const auto *r=pattern::match(rs,f)){
+                auto generated=pattern::bake(*r,f,error);if(!error.empty()){message=error;return false;}
+                if(next.lines.size()+generated.size()>max_lines)return refuse("Pattern exceeds 5000 lines; increase scale");
+                next.lines.insert(next.lines.end(),generated.begin(),generated.end());f.boundary=r->boundary;active.push_back(std::move(f));
+            }
+            next.fills=std::move(active);
+        }
         if (const std::string why = edit_problem(next, !legacyOutside); !why.empty()) { message = why; return false; }
         undoStack.push_back(ship);
         if (undoStack.size() > max_undo) undoStack.erase(undoStack.begin());
@@ -241,6 +304,12 @@ inline std::string post_body(const Ship &s, const std::string &passphrase, bool 
         json::Value o = json::Value::object();
         o.set("startX", num(l.a.x)); o.set("startY", num(l.a.y)); o.set("endX", num(l.b.x)); o.set("endY", num(l.b.y));
         o.set("color", json::Value::string_value(l.color));
+        o.set("width",num(l.width));
+        if(!l.id.empty())o.set("id",json::Value::string_value(l.id));
+        if(l.mesh)o.set("mesh",json::Value::bool_value(true));
+        if(l.curved){o.set("controlX",num(l.control.x));o.set("controlY",num(l.control.y));}
+        if(!l.meshGroup.empty())o.set("meshGroup",json::Value::string_value(l.meshGroup));
+        if(!l.pairId.empty())o.set("pairId",json::Value::string_value(l.pairId));
         lines.items.push_back(std::move(o));
     }
     v.set("customLines", std::move(lines));
@@ -249,6 +318,8 @@ inline std::string post_body(const Ship &s, const std::string &passphrase, bool 
         for (const auto &p : *pts) { json::Value o = json::Value::object(); o.set("x", num(p.x)); o.set("y", num(p.y)); arr.items.push_back(std::move(o)); }
         v.set(key, std::move(arr));
     }
+    json::Value fills;fills.type=json::Value::Type::array;for(const auto &f:s.fills)fills.items.push_back(pattern::fill_json(f));
+    v.set("editorFills",fills);
     v.set("shotSound", json::Value::string_value(s.shotSound));
     v.set("isPublic", json::Value::bool_value(isPublic));
     if (!passphrase.empty()) v.set("passphrase", json::Value::string_value(passphrase));
@@ -259,11 +330,14 @@ inline std::string post_body(const Ship &s, const std::string &passphrase, bool 
 inline bool from_server(const json::Value &v, Ship &out) {
     if (!v.is_object()) return false;
     Ship s;
-    s.name = v.str("name", "Ship").substr(0, max_name);
-    s.color = v.str("color", "white").substr(0, max_name);
-    s.shotSound = sound::valid_shot(v.str("shotSound"));
+    json::Value parsedDoc;const json::Value *doc=v.get("editorDocument"),*data=&v;
+    if(doc && doc->type==json::Value::Type::string && json::parse(doc->s,parsedDoc))doc=&parsedDoc;
+    if(doc && doc->is_object() && doc->get("ship") && doc->get("ship")->is_object())data=doc->get("ship");
+    s.name = data->str("name", "Ship").substr(0, max_name);
+    s.color = data->str("color", "white").substr(0, max_name);
+    s.shotSound = sound::valid_shot(data->str("shotSound"));
     auto arr = [&](const char *key, json::Value &scratch) -> const json::Value * {
-        const json::Value *a = v.get(key);
+        const json::Value *a = data->get(key);
         if (a && a->type == json::Value::Type::string && json::parse(a->s, scratch)) a = &scratch;
         return a && a->is_array() ? a : nullptr;
     };
@@ -272,13 +346,33 @@ inline bool from_server(const json::Value &v, Ship &out) {
         for (const auto &l : lines->items) {
             if (!l.is_object()) continue;
             Line line{{l.num("startX"), l.num("startY")}, {l.num("endX"), l.num("endY")}, l.str("color", s.color)};
+            line.width=l.num("width")==1?1:2;
+            line.mesh=l.get("mesh") && l.get("mesh")->b;
+            line.curved=l.get("controlX") && l.get("controlY") &&
+                l.get("controlX")->type==json::Value::Type::number && l.get("controlY")->type==json::Value::Type::number;
+            line.control={l.num("controlX"),l.num("controlY")};
+            line.meshGroup=l.str("meshGroup");line.pairId=l.str("pairId");line.id=l.str("id");
             if (std::isfinite(line.a.x) && std::isfinite(line.a.y) && std::isfinite(line.b.x) && std::isfinite(line.b.y)) s.lines.push_back(line);
         }
     for (auto [key, into] : {std::pair{"thrusterPoints", &s.thrusters}, std::pair{"weaponPoints", &s.weapons}}) {
         json::Value sc;
         if (const auto *pts = arr(key, sc)) for (const auto &p : pts->items) if (p.is_object()) into->push_back({p.num("x"), p.num("y")});
     }
+    const auto *fills=doc && doc->is_object()?doc->get("fills"):v.get("editorFills");
+    if(fills && fills->is_array())for(const auto &f:fills->items)if(f.is_object())s.fills.push_back(pattern::read_fill(f));
     out = std::move(s);
     return true;
 }
+inline json::Value document(const Ship &s) {
+    json::Value ship;json::parse(post_body(s,{},false),ship);
+    std::erase_if(ship.fields,[](const auto &f){return f.first=="isPublic" || f.first=="editorFills";});
+    auto hex=[](const std::string &c){char text[8];std::snprintf(text,sizeof text,"#%06x",cssteroids::css_color(c));return std::string(text);};
+    ship.set("color",json::Value::string_value(hex(s.color)));
+    for(auto &field:ship.fields)if(field.first=="customLines")for(auto &l:field.second.items)l.set("color",json::Value::string_value(hex(l.str("color"))));
+    auto d=json::Value::object();d.set("version",num(1));d.set("ship",ship);json::Value fills;fills.type=json::Value::Type::array;
+    for(const auto &f:s.fills)fills.items.push_back(pattern::fill_json(f));
+    d.set("fills",fills);return d;
+}
+inline std::string save_body(const Ship &s,bool isPublic) {auto body=json::Value::object();body.set("document",document(s));body.set("isPublic",json::Value::bool_value(isPublic));return json::dump(body);}
+
 }
