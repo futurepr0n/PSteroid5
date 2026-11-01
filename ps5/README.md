@@ -122,12 +122,22 @@ Select FILL with L1/R1, put the cursor inside a closed hull region, and press CR
 The pattern step shows a freeform repeating tile and a live ship preview. Nested
 closed hulls become holes; crossing hull lines divide separate fill regions.
 
-In the tile: left stick/touchpad moves the cursor, CROSS places stroke endpoints,
-L1/R1 chooses LINE/MOVE/ERASE/PAINT, L2/R2 chooses colour, SQUARE/TRIANGLE undo/redo,
-R3 toggles mirror, L3 toggles fine steps, and right stick pans when zoomed.
-OPTIONS opens Apply, Cancel, six presets (grid, hex, triangle, diamond, ribs,
-crosshatch), blank artwork, repeat scale, stroke width, zoom/fit, naming, local
-library, remove fill, and apply/test flight. Use LEFT/RIGHT on preset/scale items.
+In the tile: left stick/touchpad moves the cursor (snapping to quarter tile units,
+sixteenths with L3), D-pad left/right nudges it, CROSS places stroke endpoints,
+L1/R1 chooses LINE/MOVE/ERASE/PAINT/BEND, L2/R2 chooses colour, SQUARE/TRIANGLE
+undo/redo, R3 toggles mirror and right stick pans when zoomed. BEND: CROSS on a
+line, move, CROSS again to curve it through the cursor (its mirror partner follows).
+The highlighted line's mirror partner shows dashed magenta. D-pad up/down zooms the
+live ship view (fit to 400%) around the area being filled. A hint for the current
+tool and the ship's area/filled count sit under the live view.
+OPTIONS groups Apply (apply and return, apply and test flight, apply and choose
+another area, cancel, remove fill), Tile (preset with thumbnails, pattern scale,
+stroke width, tile zoom) and Library and sharing (rename, local library, CSP1).
+Use LEFT/RIGHT on preset/scale items. Pattern scale matches the browser: design
+units per tile unit, default 20, steps of x1.25 rounded to two decimals.
+
+The ship editor canvas fits ships scaled beyond the ±200 drawing square (outlined in
+cyan) and D-pad up/down zooms it around the cursor; D-pad left/right still steps.
 Applying is one ship undo step. Hull edits refit linked fills; opening their boundary
 removes their artwork and recipe together, and undo restores both.
 

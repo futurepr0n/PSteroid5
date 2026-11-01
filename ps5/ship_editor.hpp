@@ -39,6 +39,29 @@ inline bool inside(Pt p) { return std::isfinite(p.x) && std::isfinite(p.y) && st
 inline Pt mirror(Pt p) { return {p.x == 0 ? 0 : -p.x, p.y}; }
 inline Pt snap(Pt p, double step) { return {std::round(p.x / step) * step, std::round(p.y / step) * step}; }
 inline Pt clamp_canvas(Pt p) { return {std::clamp(p.x, -half, half), std::clamp(p.y, -half, half)}; }
+// Position 0..1 along a line (curves sampled like nearest_line) closest to p.
+inline double param_at(const Line &l, Pt p) {
+    const int n = l.curved ? 16 : 1;
+    double best = 1e30, bt = 0; Pt a = l.a;
+    for (int j = 1; j <= n; ++j) {
+        const double t = double(j) / n, u = 1 - t;
+        const Pt b = l.curved ? Pt{u * u * l.a.x + 2 * u * t * l.control.x + t * t * l.b.x, u * u * l.a.y + 2 * u * t * l.control.y + t * t * l.b.y} : l.b;
+        const double dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+        const double k = len2 > 0 ? std::clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / len2, 0.0, 1.0) : 0;
+        const double d = std::hypot(a.x + k * dx - p.x, a.y + k * dy - p.y);
+        if (d < best) { best = d; bt = (j - 1 + k) / n; }
+        a = b;
+    }
+    return bt;
+}
+// The browser's curveThrough: bend l so the point grabbed at `grab` passes through `to`, endpoints fixed.
+inline Line curve_through(Line l, Pt grab, Pt to) {
+    const double t = std::clamp(param_at(l, grab), .08, .92), u = 1 - t;
+    l.control = clamp_canvas({(to.x - u * u * l.a.x - t * t * l.b.x) / (2 * u * t), (to.y - u * u * l.a.y - t * t * l.b.y) / (2 * u * t)});
+    l.curved = true;
+    return l;
+}
+
 
 // The server's acceptance rules (validateShipData + sanitizeMMOShipData limits) plus, unless
 // the ship was drawn elsewhere already beyond it, the editor's ±200 canvas.
@@ -136,6 +159,32 @@ public:
         next.lines[size_t(i)].color = color;if(width>0)next.lines[size_t(i)].width=width;
         if (mirrorOn) for (auto &l : next.lines) if (same_line(l, {mirror(was.a), mirror(was.b), was.color})) {l.color = color;if(width>0)l.width=width;}
         return commit(std::move(next));
+    }
+    // Bend the line under `grab` so it passes through `to`; endpoints stay fixed (browser curveThrough).
+    bool bend_line(Pt grab, Pt to) {
+        const int i = nearest_line(grab);
+        if (i < 0) return refuse("no line here");
+        if (ship.lines[size_t(i)].mesh) return refuse("Use FILL to edit or remove pattern artwork");
+        Ship next = ship;
+        const Line was = next.lines[size_t(i)];
+        Line &l = next.lines[size_t(i)];
+        l = curve_through(was, grab, to);
+        // a quadratic is the same curve either way round, so the partner just takes the mirrored control point
+        if (mirrorOn) for (size_t j = 0; j < next.lines.size(); j++)
+            if (j != size_t(i) && same_line(next.lines[j], {mirror(was.a), mirror(was.b), was.color})) { next.lines[j].control = mirror(l.control); next.lines[j].curved = true; }
+        return commit(std::move(next));
+    }
+    // Index of the line that mirrors line i across the centre axis, or -1.
+    int mirror_of(int i) const {
+        if (i < 0 || size_t(i) >= ship.lines.size()) return -1;
+        const Line &l = ship.lines[size_t(i)];
+        for (size_t j = 0; j < ship.lines.size(); j++) {
+            const Line &m = ship.lines[j];
+            if (j == size_t(i)) continue;
+            if (!l.pairId.empty() && m.pairId == l.pairId) return int(j);
+            if (same_line(m, {mirror(l.a), mirror(l.b), l.color})) return int(j);
+        }
+        return -1;
     }
     // Move every endpoint at `from` (and its mirror) to `to`: the whole joint moves.
     bool move_point(Pt from, Pt to) {

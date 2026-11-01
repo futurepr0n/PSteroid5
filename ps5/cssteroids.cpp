@@ -11,6 +11,17 @@ constexpr int menu_count = 8, menu_sound = 6;
 // Ship editor (docs/ship-design-space.md): tools, its OPTIONS menu, canvas placement.
 enum class Tool { line, move, erase, paint, thruster, weapon, fill };
 const char *const tool_names[] = {"LINE", "MOVE", "ERASE", "PAINT", "THRUSTER", "WEAPON", "FILL"};
+// Pattern tile tools (L1/R1) and the one-line hint shown for each, after the browser's tile tools.
+const char *const pattern_tool_names[] = {"LINE", "MOVE", "ERASE", "PAINT", "BEND"};
+const char *const pattern_tool_help[] = {"CROSS starts a line, CROSS again ends it", "CROSS on an endpoint, then CROSS where it goes",
+                                         "CROSS removes the highlighted line", "CROSS recolours the highlighted line",
+                                         "CROSS on a line, move, then CROSS to bend it through the cursor"};
+constexpr int pattern_tool_count = 5;
+// Pattern OPTIONS menu: items keep their numbers; the menu lists them in three groups.
+constexpr int pattern_menu_count = 14;
+constexpr std::array<int, pattern_menu_count> pattern_menu_order = {0, 10, 13, 1, 9, 2, 3, 4, 5, 6, 7, 8, 11, 12};
+constexpr std::array<int, 3> pattern_menu_groups = {5, 4, 5};
+const char *const pattern_menu_group_names[] = {"APPLY", "TILE", "LIBRARY AND SHARING"};
 constexpr int tool_count = 7;
 const char *const editor_menu[] = {"SAVE", "SAVE AS NEW SHIP", "TEST FLIGHT", "RENAME SHIP", "CUSTOM COLOUR", "PUBLIC IN GALLERY", "WEAPON SOUND", "RESTORE LOCAL DRAFT", "SCALE DOWN 90%", "SCALE UP 110%", "CLEAR ALL", "EXIT EDITOR"};
 constexpr int editor_menu_count = 12, editor_menu_sound = 6;
@@ -67,7 +78,8 @@ class VulkanExample : public ps5ui::KitExample {
     std::vector<cssteroids::editor::Line> patternPreview;
     std::string fillId, patternError, savedSnapshot;
     int patternTool=0, patternMenuIndex=0, patternPreset=0, patternLibraryIndex=-1, patternRevision=0, previewRevision=-1;
-    double patternScale=5, patternWidth=1, tileZoom=1;
+    double patternScale=20, patternWidth=1, tileZoom=1;   // scale matches the browser: design units per tile unit, default 20
+    int areaCount=0, areaRevision=-1;
     size_t shipZoomIndex=0;   // index into pattern::view_zooms; 0 fits the whole ship
     size_t editorZoomIndex=0;
     cssteroids::editor::pattern::View editorView{{0,0},canvas_scale};
@@ -877,7 +889,7 @@ class VulkanExample : public ps5ui::KitExample {
             if(const auto *seed=pendingPattern.get("seed"))openPattern({seed->num("x"),seed->num("y")});
             if(patternOpen && pendingPattern.get("tile")){
                 auto tile=cssteroids::editor::pattern::read_tile(*pendingPattern.get("tile"));
-                if(cssteroids::editor::pattern::valid(tile)){loadPatternTile(tile);patternScale=pendingPattern.num("scale",5);fillId=pendingPattern.str("fillId");patternDirty=true;previewRevision=-1;}
+                if(cssteroids::editor::pattern::valid(tile)){loadPatternTile(tile);patternScale=pendingPattern.num("scale",20);fillId=pendingPattern.str("fillId");patternDirty=true;previewRevision=-1;}
             }
         }
     }
@@ -913,6 +925,8 @@ class VulkanExample : public ps5ui::KitExample {
         if ((tool == Tool::line || tool == Tool::move) && ed.nearest_vertex(cursor, v, snap_radius) && inside(v)) p = v; // join existing points
         return p;
     }
+    // Tile snapping matches the browser: quarter tile units, sixteenths with L3 fine
+    double tileStep() const { return 400. / std::max(1, activeTile.side) / (fineGrid ? 16 : 4); }
     cssteroids::editor::pattern::Tile currentTile() const {
         auto t=activeTile;t.original={};t.lines.clear();t.width=patternWidth;
         const double k=t.side/400.;
@@ -938,7 +952,7 @@ class VulkanExample : public ps5ui::KitExample {
         if(!error.empty()){ed.message=error;return;}
         const auto *r=pattern::region_at(rs,seed);
         if(!r){ed.message="Choose a closed hull region; join any open endpoints first";return;}
-        fillRegion=*r;fillSeed=seed;shipCursor=cursor;fillId.clear();patternScale=5;patternDirty=false;
+        fillRegion=*r;fillSeed=seed;shipCursor=cursor;fillId.clear();patternScale=20;patternDirty=false;
         auto tile=pattern::preset("grid");tile.color=currentColor();for(auto &l:tile.lines)l.color=tile.color;
         for(const auto &f:ed.ship.fills)if(pattern::match(rs,f)==r){
             fillId=f.id;patternScale=f.scale;
@@ -964,7 +978,7 @@ class VulkanExample : public ps5ui::KitExample {
     }
     void patternPress() {
         using namespace cssteroids::editor;
-        auto at=clamp_canvas(snap(tileCursor,fineGrid?fine:grid));Pt vertex;
+        auto at=clamp_canvas(snap(tileCursor,tileStep()));Pt vertex;
         if(patternTool<2 && tileEditor.nearest_vertex(tileCursor,vertex))at=vertex;
         const int before=tileEditor.revision;
         if(patternTool==0){
@@ -975,7 +989,11 @@ class VulkanExample : public ps5ui::KitExample {
             if(!patternGrabbing){if(tileEditor.nearest_vertex(tileCursor,vertex,10)){tileGrab=vertex;patternGrabbing=true;}else patternError="Choose a tile endpoint";return;}
             tileEditor.move_point(tileGrab,at);patternGrabbing=false;
         }else if(patternTool==2)tileEditor.erase_near(tileCursor);
-        else tileEditor.paint_near(tileCursor,currentColor(),patternWidth);
+        else if(patternTool==3)tileEditor.paint_near(tileCursor,currentColor(),patternWidth);
+        else {
+            if(!patternGrabbing){if(tileEditor.nearest_line(tileCursor)>=0){tileGrab=tileCursor;patternGrabbing=true;}else patternError="Choose a tile line to bend";return;}
+            tileEditor.bend_line(tileGrab,at);patternGrabbing=false;
+        }
         if(tileEditor.revision!=before){++patternRevision;patternDirty=true;previewRevision=-1;}
         else patternError=tileEditor.message;
     }
@@ -1001,9 +1019,9 @@ class VulkanExample : public ps5ui::KitExample {
         using namespace cssteroids::editor;
         const uint32_t pressed=pad.pressed;
         if(patternMenu){
-            constexpr int count=13;
-            if(pressed & PAD_UP)patternMenuIndex=(patternMenuIndex+count-1)%count;
-            if(pressed & PAD_DOWN)patternMenuIndex=(patternMenuIndex+1)%count;
+            const int pos=int(std::find(pattern_menu_order.begin(),pattern_menu_order.end(),patternMenuIndex)-pattern_menu_order.begin());
+            if(pressed & PAD_UP)patternMenuIndex=pattern_menu_order[size_t((pos+pattern_menu_count-1)%pattern_menu_count)];
+            if(pressed & PAD_DOWN)patternMenuIndex=pattern_menu_order[size_t((pos+1)%pattern_menu_count)];
             if(pressed & (PAD_CIRCLE|PAD_OPTIONS)){patternMenu=false;return;}
             const int direction=(pressed & PAD_LEFT)?-1:(pressed & PAD_RIGHT)?1:0;
             const bool activate=pressed & PAD_CROSS;
@@ -1014,12 +1032,17 @@ class VulkanExample : public ps5ui::KitExample {
                 loadPatternTile(t);patternDirty=true;return;
             }
             if(patternMenuIndex==3 && (activate || direction)){
-                patternScale=std::clamp(patternScale*(direction<0?.8:1.25),.05,10000.);++patternRevision;previewRevision=-1;patternDirty=true;return;
+                patternScale=std::clamp(std::round(patternScale*(direction<0?.8:1.25)*100)/100,.05,10000.);++patternRevision;previewRevision=-1;patternDirty=true;return;
             }
             if(patternMenuIndex==4 && (activate || direction)){patternWidth=patternWidth==1?2:1;++patternRevision;patternDirty=true;return;}
             if(patternMenuIndex==5 && (activate || direction)){tileZoom=tileZoom>=4?1:tileZoom*2;double limit=200-200/tileZoom;tilePan={std::clamp(tileCursor.x,-limit,limit),std::clamp(tileCursor.y,-limit,limit)};return;}
             if(!activate)return;
             if(patternMenuIndex==0){applyPattern();return;}
+            if(patternMenuIndex==13){
+                if(patternDirty && !applyPattern(false))return;
+                patternOpen=patternMenu=false;patternPending=patternGrabbing=touchDown=false;cursor=shipCursor;++patternRevision;saveDraft();
+                tool=Tool::fill;ed.message="Pick another closed area to fill";return;
+            }
             if(patternMenuIndex==1){patternOpen=patternMenu=false;patternPending=patternGrabbing=touchDown=false;cursor=shipCursor;++patternRevision;saveDraft();return;}
             if(patternMenuIndex==6){saveDraft();screen=Screen::name;nameForPattern=true;nameForShip=false;nameDraft=activeTile.name.substr(0,name_max);nameCursor=0;patternMenu=false;return;}
             if(patternMenuIndex==7){savePatternLibrary();return;}
@@ -1039,7 +1062,7 @@ class VulkanExample : public ps5ui::KitExample {
             patternError=written && std::rename(tmp.c_str(),path.c_str())==0?"CSP1 exported to pattern-code.txt":"Could not export pattern code";
             return;
         }
-        const double step=fineGrid?fine:grid;
+        const double step=tileStep();
         tileCursor.x+=pad.left_x*std::fabs(pad.left_x)*250*dt/tileZoom;tileCursor.y+=pad.left_y*std::fabs(pad.left_y)*250*dt/tileZoom;
         if(pressed & PAD_LEFT)tileCursor.x=snap(tileCursor,step).x-step;
         if(pressed & PAD_RIGHT)tileCursor.x=snap(tileCursor,step).x+step;
@@ -1057,8 +1080,8 @@ class VulkanExample : public ps5ui::KitExample {
         if(pressed & PAD_OPTIONS)patternMenu=true;
         if(pressed & PAD_SQUARE){if(tileEditor.undo()){++patternRevision;patternDirty=true;previewRevision=-1;}}
         if(pressed & PAD_TRIANGLE){if(tileEditor.redo()){++patternRevision;patternDirty=true;previewRevision=-1;}}
-        if(pressed & PAD_L1){patternTool=(patternTool+3)%4;patternPending=patternGrabbing=false;}
-        if(pressed & PAD_R1){patternTool=(patternTool+1)%4;patternPending=patternGrabbing=false;}
+        if(pressed & PAD_L1){patternTool=(patternTool+pattern_tool_count-1)%pattern_tool_count;patternPending=patternGrabbing=false;}
+        if(pressed & PAD_R1){patternTool=(patternTool+1)%pattern_tool_count;patternPending=patternGrabbing=false;}
         const int n=int(palette.size())+1;
         if(pad.r2>.6 && !patternR2){colorIndex=(colorIndex+1)%n;patternR2=true;}else if(pad.r2<.3)patternR2=false;
         if(pad.l2>.6 && !patternL2){colorIndex=(colorIndex+n-1)%n;patternL2=true;}else if(pad.l2<.3)patternL2=false;
@@ -1093,20 +1116,27 @@ class VulkanExample : public ps5ui::KitExample {
             const float dx=x(i*400./side-200),dy=y(j*400./side-200);
             if(dx>=left && dx<=left+size && dy>=top && dy<=top+size)scene.circle(dx,dy,2.5f,Color::rgb(0x2a4a5a));
         }
-        const int hot=patternTool>=2?tileEditor.nearest_line(tileCursor):-1;
+        const int hot=patternTool>=2?tileEditor.nearest_line(patternGrabbing?tileGrab:tileCursor):-1,mate=tileEditor.mirror_of(hot);
         for(size_t i=0;i<tileEditor.ship.lines.size();++i){
             const auto &l=tileEditor.ship.lines[i];const bool isHot=int(i)==hot;
+            if(int(i)==mate)continue;
             auto pts=pattern::flatten(l);
             for(size_t k=1;k<pts.size();++k)tileLine(pts[k-1],pts[k],isHot?4:float(l.width)*2,isHot?(patternTool==2?0xff6b7a:0x2ef2ff):cssteroids::css_color(l.color));
         }
-        auto at=clamp_canvas(snap(tileCursor,fineGrid?fine:grid));
+        // the highlighted line's mirror partner, dashed magenta as in the browser
+        if(mate>=0){auto pts=pattern::flatten(tileEditor.ship.lines[size_t(mate)]);for(size_t k=1;k<pts.size();++k)dashed(pts[k-1],pts[k],3,0xff3bd4,.9f);}
+        auto at=clamp_canvas(snap(tileCursor,tileStep()));
         auto marker=[&](Pt p){if(x(p.x)>=left && x(p.x)<=left+size && y(p.y)>=top && y(p.y)<=top+size){scene.circle(x(p.x),y(p.y),6,Color::rgb(0x000000));scene.ring(x(p.x),y(p.y),6,2,Color::rgb(0x00ffff));}};
         if(patternPending){
             const uint32_t c=cssteroids::css_color(currentColor());
             dashed(tileStart,at,float(patternWidth)*2,c,.9f);if(tileEditor.mirrorOn)dashed(mirror(tileStart),mirror(at),float(patternWidth)*2,c,.5f);
             marker(tileStart);
         }
-        if(patternGrabbing){dashed(tileGrab,at,2,0x00ffff,.8f);marker(tileGrab);}
+        if(patternGrabbing && patternTool==4 && hot>=0){
+            auto pts=pattern::flatten(curve_through(tileEditor.ship.lines[size_t(hot)],tileGrab,at));
+            for(size_t k=1;k<pts.size();++k)tileLine(pts[k-1],pts[k],2,0x00ffff,.8f);
+            marker(tileGrab);
+        }else if(patternGrabbing){dashed(tileGrab,at,2,0x00ffff,.8f);marker(tileGrab);}
         if(tileEditor.mirrorOn)dashed({0,-200},{0,200},1,0xff3bd4,.35f);
         if(x(at.x)>=left && x(at.x)<=left+size && y(at.y)>=top && y(at.y)<=top+size){scene.line(x(at.x)-10,y(at.y),x(at.x)+10,y(at.y),2,Color::rgb(0xffffff));scene.line(x(at.x),y(at.y)-10,x(at.x),y(at.y)+10,2,Color::rgb(0xffffff));}
         if(tileZoom>1){
@@ -1153,14 +1183,41 @@ class VulkanExample : public ps5ui::KitExample {
             frame(mxp(view.centre.x-h),myp(view.centre.y-h),float(2*h*mini.scale),0xf5e400,1,1);
         }
 
-        char info[200];std::snprintf(info,sizeof info,"%s   %zu / 256 LINES   WIDTH %.0f   REPEAT %.2f   TILE ZOOM %.0fx",tool_names[patternTool],tileEditor.ship.lines.size(),patternWidth,patternScale,tileZoom);
+        // tool hint and ship area count under the live view, like the browser's status bar
+        if(areaRevision!=ed.revision){std::string e;areaCount=int(pattern::regions(ed.ship.lines,e).size());areaRevision=ed.revision;}
+        char areas[64];std::snprintf(areas,sizeof areas,"%d AREAS   %zu FILLED",areaCount,ed.ship.fills.size());
+        text(pattern_tool_help[patternTool],viewLeft,top+viewSize+40,20,0xf5e400);
+        text(areas,viewLeft,top+viewSize+72,20,0x6d8893);
+        char info[200];std::snprintf(info,sizeof info,"%s   %zu / 256 LINES   WIDTH %.0f   SCALE %.2f   TILE ZOOM %.0fx",pattern_tool_names[patternTool],tileEditor.ship.lines.size(),patternWidth,patternScale,tileZoom);
         text(info,80,985,23,0x9fb3c8);
         text("L1 R1 Tool   L2 R2 Colour   CROSS Place   SQUARE Undo   TRIANGLE Redo   R3 Mirror   L3 Fine   D-PAD LEFT/RIGHT Nudge",80,1020,19,0x8293ab);
         text(patternError.empty()?"OPTIONS Apply / Presets / Scale / Library / Test     RIGHT STICK Pan tile     D-PAD UP/DOWN Zoom ship     CIRCLE Cancel stroke / Menu":patternError,80,1052,19,patternError.empty()?0x8293ab:0xf0c07d);
         if(patternMenu){
-            std::array<std::string,13> labels={"APPLY AND RETURN TO SHIP","CANCEL TILE CHANGES","PRESET: "+patternNames[patternPreset],"REPEAT SCALE (LEFT/RIGHT)","LINE WIDTH: "+std::to_string(int(patternWidth)),"ZOOM: "+std::to_string(int(tileZoom))+"x","RENAME PATTERN","SAVE TO LOCAL PATTERNS","LOAD NEXT LOCAL PATTERN","REMOVE THIS REGION'S FILL","APPLY AND TEST FLIGHT","IMPORT CSP1 FROM pattern-code.txt","EXPORT CSP1 TO pattern-code.txt"};
-            scene.rounded_rect({480,110,960,840},12,Color::rgb(0x08111f,.98));
-            for(int i=0;i<13;++i){if(i==patternMenuIndex)scene.rounded_rect({505,135+i*60.f,910,53},6,Color::rgb(0x124466));centered(labels[i],171+i*60.f,25,i==patternMenuIndex?0x00ffff:0x9fb3c8);}
+            char scaleLabel[48];std::snprintf(scaleLabel,sizeof scaleLabel,"PATTERN SCALE  %.2f  (LEFT/RIGHT)",patternScale);
+            const std::array<std::string,pattern_menu_count> labels={"APPLY AND RETURN TO SHIP","CANCEL TILE CHANGES","PRESET: "+patternNames[patternPreset]+"  (LEFT/RIGHT)",scaleLabel,"LINE WIDTH: "+std::to_string(int(patternWidth))+"PX","TILE ZOOM: "+std::to_string(int(tileZoom))+"x","RENAME PATTERN","SAVE TO LOCAL PATTERNS","LOAD NEXT LOCAL PATTERN","REMOVE THIS REGION'S FILL","APPLY AND TEST FLIGHT","IMPORT CSP1 FROM pattern-code.txt","EXPORT CSP1 TO pattern-code.txt","APPLY AND CHOOSE ANOTHER AREA"};
+            scene.rounded_rect({420,70,1080,960},12,Color::rgb(0x08111f,.98));
+            float rowY=100;size_t at=0;
+            for(size_t g=0;g<pattern_menu_groups.size();++g){
+                text(pattern_menu_group_names[g],470,rowY+24,18,0x8aa4ae);rowY+=36;
+                for(int k=0;k<pattern_menu_groups[g];++k,++at){
+                    const int item=pattern_menu_order[at];const bool on=item==patternMenuIndex;
+                    if(on)scene.rounded_rect({450,rowY,1020,42},6,Color::rgb(0x124466));
+                    text(labels[size_t(item)],475,rowY+30,23,on?0x00ffff:0x9fb3c8);rowY+=46;
+                }
+                rowY+=8;
+            }
+            // preset thumbnails: the current preset framed in yellow, brighter while its row is selected
+            static std::array<pattern::Tile,7> thumbs;static bool thumbsReady=false;
+            if(!thumbsReady){for(size_t i=0;i<thumbs.size();++i)thumbs[i]=patternNames[i]=="blank"?pattern::Tile{}:pattern::preset(patternNames[i]);thumbsReady=true;}
+            const float box=112,gap=24,stripLeft=960-(7*box+6*gap)/2,stripTop=rowY+6;
+            for(size_t i=0;i<thumbs.size();++i){
+                const float bx=stripLeft+float(i)*(box+gap);const bool chosen=int(i)==patternPreset;
+                scene.rounded_rect({bx,stripTop,box,box},4,Color::rgb(0x000000));
+                frame(bx,stripTop,box,chosen?0xf5e400:0x16303b,chosen?2.f:1.f,chosen?(patternMenuIndex==2?1.f:.6f):1.f);
+                const float k=box/float(std::max(1,thumbs[i].side));
+                for(const auto &l:thumbs[i].lines){auto pts=pattern::flatten(l);for(size_t j=1;j<pts.size();++j)scene.line(bx+float(pts[j-1].x)*k,stripTop+float(pts[j-1].y)*k,bx+float(pts[j].x)*k,stripTop+float(pts[j].y)*k,1,Color::rgb(chosen?0xf5e400:0x8aa4ae));}
+                text(patternNames[i],bx+4,stripTop+box+22,16,chosen?0xf5e400:0x6d8893);
+            }
         }
     }
     void editorPress() {   // CROSS or touchpad press

@@ -88,6 +88,24 @@ int main() {
         CHECK(!fresh.add_line({0, 0}, {250, 0}, "#ffffff") && fresh.message == "a line leaves the canvas");
         CHECK(same_pt(clamp_canvas({250, -999}), {200, -200}) && same_pt(snap({7.4, -2.6}, grid), {5, -5}));
     }
+    {   // bend: the curve passes through the drag point, endpoints stay, the mirror partner follows, undo restores
+        Editor ed;
+        ed.mirrorOn = true;
+        CHECK(ed.add_line({20, -50}, {20, 50}, "#00ffff", 1) && ed.ship.lines.size() == 2);
+        CHECK(ed.bend_line({20, 0}, {60, 0}));
+        const Line &l = ed.ship.lines[0];
+        const Pt mid = pattern::at(l, .5);
+        CHECK(l.curved && std::fabs(mid.x - 60) < 1e-9 && std::fabs(mid.y) < 1e-9);
+        CHECK(same_pt(l.a, {20, -50}) && same_pt(l.b, {20, 50}));
+        const Line &m = ed.ship.lines[1];
+        CHECK(m.curved && same_pt(m.control, mirror(l.control)) && std::fabs(pattern::at(m, .5).x + 60) < 1e-9);
+        CHECK(ed.mirror_of(0) == 1 && ed.mirror_of(1) == 0);
+        CHECK(ed.undo() && !ed.ship.lines[0].curved && !ed.ship.lines[1].curved);
+        CHECK(!ed.bend_line({-150, 150}, {0, 0}) && !ed.message.empty());
+        ed.mirrorOn = false;
+        CHECK(ed.bend_line({20, -48}, {190, -190}));
+        CHECK(inside(ed.ship.lines[0].control));
+    }
     if (failures) { std::printf("%d editor test failure(s)\n", failures); return 1; }
     std::puts("editor tests passed");
     return 0;
