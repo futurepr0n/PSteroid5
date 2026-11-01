@@ -68,6 +68,7 @@ class VulkanExample : public ps5ui::KitExample {
     std::string fillId, patternError, savedSnapshot;
     int patternTool=0, patternMenuIndex=0, patternPreset=0, patternLibraryIndex=-1, patternRevision=0, previewRevision=-1;
     double patternScale=5, patternWidth=1, tileZoom=1;
+    size_t shipZoomIndex=0;   // index into pattern::view_zooms; 0 fits the whole ship
     cssteroids::editor::Pt tilePan;
     bool patternR2=false,patternL2=false;
     const std::array<std::string,7> patternNames={"grid","hex","triangle","diamond","ribs","crosshatch","blank"};
@@ -929,7 +930,7 @@ class VulkanExample : public ps5ui::KitExample {
             else {tile=pattern::preset(f.kind);tile.color=f.color;for(auto &l:tile.lines){l.color=f.color;l.width=f.width;}patternScale=std::max(.05,f.scale/2);}
             break;
         }
-        loadPatternTile(tile);patternOpen=true;patternMenu=false;patternMenuIndex=0;patternTool=0;
+        loadPatternTile(tile);patternOpen=true;patternMenu=false;patternMenuIndex=0;patternTool=0;shipZoomIndex=0;
         patternError.clear();pending=grabbing=touchDown=false;lastTouchCount=0;
     }
     bool applyPattern(bool close=true) {
@@ -1026,8 +1027,9 @@ class VulkanExample : public ps5ui::KitExample {
         tileCursor.x+=pad.left_x*std::fabs(pad.left_x)*250*dt/tileZoom;tileCursor.y+=pad.left_y*std::fabs(pad.left_y)*250*dt/tileZoom;
         if(pressed & PAD_LEFT)tileCursor.x=snap(tileCursor,step).x-step;
         if(pressed & PAD_RIGHT)tileCursor.x=snap(tileCursor,step).x+step;
-        if(pressed & PAD_UP)tileCursor.y=snap(tileCursor,step).y-step;
-        if(pressed & PAD_DOWN)tileCursor.y=snap(tileCursor,step).y+step;
+        // D-pad up/down zooms the live ship view around the region being filled
+        if((pressed & PAD_UP) && shipZoomIndex+1<pattern::view_zooms.size())++shipZoomIndex;
+        if((pressed & PAD_DOWN) && shipZoomIndex>0)--shipZoomIndex;
         const double panLimit=200-200/tileZoom;
         tilePan.x=std::clamp(tilePan.x+pad.right_x*200*dt,-panLimit,panLimit);tilePan.y=std::clamp(tilePan.y+pad.right_y*200*dt,-panLimit,panLimit);
         if(pad.touch_count>0){if(lastTouchCount>0 && pad.touch_id==lastTouchId){tileCursor.x+=(pad.touch_x-lastTouchX)*.26/tileZoom;tileCursor.y+=(pad.touch_y-lastTouchY)*.26/tileZoom;}lastTouchX=pad.touch_x;lastTouchY=pad.touch_y;lastTouchId=pad.touch_id;}
@@ -1050,29 +1052,95 @@ class VulkanExample : public ps5ui::KitExample {
     void drawPattern() {
         using namespace cssteroids::editor;using hui::gfx::Color;
         previewPattern();
-        text("SHIP / PATTERN / TEST",60,80,32,0x00ffff);text("PATTERN: "+activeTile.name,700,80,30,0xff80ff);
-        text("REPEATING TILE",80,155,26,0x00ffff);text("LIVE SHIP FILL",1000,155,26,0x00ffff);
-        const float left=80,top=200,size=720,viewLeft=1010,viewSize=700;
-        scene.rounded_rect({left,top,size,size},0,Color::rgb(0x050a12));scene.rounded_rect({viewLeft,top,viewSize,viewSize},0,Color::rgb(0x050a12));
+        // Mirrors the browser designer: black tile with unit dots and a yellow frame beside a fitted ship view.
+        text("PATTERN DESIGNER",60,80,36,0x00ffff);text(ed.ship.name,440,80,30,0xffffff);text("SHIP / PATTERN / TEST",1360,80,26,0xff00ff);
+        const float left=80,top=200,size=700,viewLeft=1060,viewSize=700;
+        auto box=[](float l,float t,float s){return pattern::Region{{{l,t},{l+s,t},{l+s,t+s},{l,t+s}},{},{},double(s)*s};};
+        const auto tileBox=box(left,top,size),shipBox=box(viewLeft,top,viewSize);
+        auto clippedIn=[&](const pattern::Region &r,Pt a,Pt b,float width,uint32_t color,float alpha){for(const auto &l:pattern::clip(Line{a,b,"white"},r))scene.line(float(l.a.x),float(l.a.y),float(l.b.x),float(l.b.y),width,Color::rgb(color,alpha));};
+        auto frame=[&](float l,float t,float s,uint32_t color,float width,float alpha){scene.line(l,t,l+s,t,width,Color::rgb(color,alpha));scene.line(l+s,t,l+s,t+s,width,Color::rgb(color,alpha));scene.line(l+s,t+s,l,t+s,width,Color::rgb(color,alpha));scene.line(l,t+s,l,t,width,Color::rgb(color,alpha));};
+
+        // Tile
+        char summary[32];std::snprintf(summary,sizeof summary,"%d x %d",activeTile.side,activeTile.side);
+        text("TILE  "+activeTile.name+"  -  REPEATS IN AREA",left,top-22,20,0x8aa4ae);text(summary,left+size-70,top-22,20,0x6d8893);
+        scene.rounded_rect({left,top,size,size},0,Color::rgb(0x000000));
+        frame(left-4,top-4,size+8,0xf5e400,6,.12f);frame(left,top,size,0xf5e400,2,1);
         auto x=[&](double x){return left+size/2+float((x-tilePan.x)*size/400*tileZoom);};
         auto y=[&](double y){return top+size/2+float((y-tilePan.y)*size/400*tileZoom);};
-        pattern::Region viewport{{{left,top},{left+size,top},{left+size,top+size},{left,top+size}},{},{},size*size};
-        auto clipped=[&](Pt a,Pt b,float width,uint32_t color,float alpha=1){for(const auto &l:pattern::clip(Line{{x(a.x),y(a.y)},{x(b.x),y(b.y)},"white"},viewport))scene.line(float(l.a.x),float(l.a.y),float(l.b.x),float(l.b.y),width,Color::rgb(color,alpha));};
-        for(int i=0;i<=32;++i){double u=-200+i*12.5;clipped({u,-200},{u,200},1,0x3e6580,i%4==0?.5f:.2f);clipped({-200,u},{200,u},1,0x3e6580,i%4==0?.5f:.2f);}
-        for(const auto &l:tileEditor.ship.lines){auto pts=pattern::flatten(l);for(size_t i=1;i<pts.size();++i)clipped(pts[i-1],pts[i],float(l.width)*2,cssteroids::css_color(l.color));}
+        auto tileLine=[&](Pt a,Pt b,float width,uint32_t color,float alpha=1){clippedIn(tileBox,{x(a.x),y(a.y)},{x(b.x),y(b.y)},width,color,alpha);};
+        auto dashed=[&](Pt a,Pt b,float width,uint32_t color,float alpha){
+            const double len=std::hypot(x(b.x)-x(a.x),y(b.y)-y(a.y));const int n=std::max(1,int(len/14));
+            for(int i=0;i<n;i+=2)tileLine(pattern::mix(a,b,double(i)/n),pattern::mix(a,b,double(std::min(i+1,n))/n),width,color,alpha);
+        };
+        const int side=std::max(1,activeTile.side);
+        for(int i=0;i<=side;++i)for(int j=0;j<=side;++j){
+            const float dx=x(i*400./side-200),dy=y(j*400./side-200);
+            if(dx>=left && dx<=left+size && dy>=top && dy<=top+size)scene.circle(dx,dy,2.5f,Color::rgb(0x2a4a5a));
+        }
+        const int hot=patternTool>=2?tileEditor.nearest_line(tileCursor):-1;
+        for(size_t i=0;i<tileEditor.ship.lines.size();++i){
+            const auto &l=tileEditor.ship.lines[i];const bool isHot=int(i)==hot;
+            auto pts=pattern::flatten(l);
+            for(size_t k=1;k<pts.size();++k)tileLine(pts[k-1],pts[k],isHot?4:float(l.width)*2,isHot?(patternTool==2?0xff6b7a:0x2ef2ff):cssteroids::css_color(l.color));
+        }
         auto at=clamp_canvas(snap(tileCursor,fineGrid?fine:grid));
-        if(patternPending){clipped(tileStart,at,2,cssteroids::css_color(currentColor()),.8);if(tileEditor.mirrorOn)clipped(mirror(tileStart),mirror(at),2,cssteroids::css_color(currentColor()),.4);}
-        if(patternGrabbing)clipped(tileGrab,at,2,0x00ffff,.7);
+        auto marker=[&](Pt p){if(x(p.x)>=left && x(p.x)<=left+size && y(p.y)>=top && y(p.y)<=top+size){scene.circle(x(p.x),y(p.y),6,Color::rgb(0x000000));scene.ring(x(p.x),y(p.y),6,2,Color::rgb(0x00ffff));}};
+        if(patternPending){
+            const uint32_t c=cssteroids::css_color(currentColor());
+            dashed(tileStart,at,float(patternWidth)*2,c,.9f);if(tileEditor.mirrorOn)dashed(mirror(tileStart),mirror(at),float(patternWidth)*2,c,.5f);
+            marker(tileStart);
+        }
+        if(patternGrabbing){dashed(tileGrab,at,2,0x00ffff,.8f);marker(tileGrab);}
+        if(tileEditor.mirrorOn)dashed({0,-200},{0,200},1,0xff3bd4,.35f);
         if(x(at.x)>=left && x(at.x)<=left+size && y(at.y)>=top && y(at.y)<=top+size){scene.line(x(at.x)-10,y(at.y),x(at.x)+10,y(at.y),2,Color::rgb(0xffffff));scene.line(x(at.x),y(at.y)-10,x(at.x),y(at.y)+10,2,Color::rgb(0xffffff));}
-        auto sx=[&](double u){return viewLeft+viewSize/2+float(u*viewSize/400);};auto sy=[&](double u){return top+viewSize/2+float(u*viewSize/400);};
-        for(const auto &l:ed.ship.lines)if(l.meshGroup!=fillId || fillId.empty()){auto pts=pattern::flatten(l);for(size_t i=1;i<pts.size();++i)scene.line(sx(pts[i-1].x),sy(pts[i-1].y),sx(pts[i].x),sy(pts[i].y),float(l.width),Color::rgb(cssteroids::css_color(l.color),l.mesh?.45f:1.f));}
-        for(const auto &l:patternPreview)scene.line(sx(l.a.x),sy(l.a.y),sx(l.b.x),sy(l.b.y),float(l.width),Color::rgb(cssteroids::css_color(l.color)));
-        for(size_t i=0;i<fillRegion.points.size();++i){auto a=fillRegion.points[i],b=fillRegion.points[(i+1)%fillRegion.points.size()];scene.line(sx(a.x),sy(a.y),sx(b.x),sy(b.y),2,Color::rgb(0xff00ff,.6));}
-        if(tileZoom>1){scene.rounded_rect({820,760,150,150},0,Color::rgb(0x0b1827));for(const auto &l:tileEditor.ship.lines)scene.line(820+float(l.a.x+200)*.375f,760+float(l.a.y+200)*.375f,820+float(l.b.x+200)*.375f,760+float(l.b.y+200)*.375f,1,Color::rgb(cssteroids::css_color(l.color)));scene.ring(895+float(tilePan.x)*.375f,835+float(tilePan.y)*.375f,65/float(tileZoom),1,Color::rgb(0xffffff));}
-        char info[200];std::snprintf(info,sizeof info,"%s   %zu / 256 LINES   WIDTH %.0f   REPEAT %.2f   ZOOM %.0fx",tool_names[patternTool],tileEditor.ship.lines.size(),patternWidth,patternScale,tileZoom);
-        text(info,80,960,23,0x9fb3c8);
-        text("L1 R1 Tool   L2 R2 Colour   CROSS Place   SQUARE Undo   TRIANGLE Redo   R3 Mirror   L3 Fine",80,1000,19,0x8293ab);
-        text(patternError.empty()?"OPTIONS Apply / Presets / Scale / Library / Test     RIGHT STICK Pan     CIRCLE Cancel stroke / Menu":patternError,80,1040,19,patternError.empty()?0x8293ab:0xf0c07d);
+        if(tileZoom>1){
+            const float mx=left+size-160,my=top+10;
+            scene.rounded_rect({mx,my,150,150},0,Color::rgb(0x0b1827,.92f));
+            for(const auto &l:tileEditor.ship.lines)scene.line(mx+float(l.a.x+200)*.375f,my+float(l.a.y+200)*.375f,mx+float(l.b.x+200)*.375f,my+float(l.b.y+200)*.375f,1,Color::rgb(cssteroids::css_color(l.color)));
+            scene.ring(mx+75+float(tilePan.x)*.375f,my+75+float(tilePan.y)*.375f,65/float(tileZoom),1,Color::rgb(0xffffff));
+        }
+        // Width and colour chips under the tile, like the browser's tile row
+        const float rowY=top+size+22;
+        for(int w=1;w<=2;++w){
+            const bool on=int(patternWidth)==w;const float bx=left+(w-1)*74.f;
+            scene.rounded_rect({bx,rowY,66,34},4,Color::rgb(on?0x0b2a33:0x0a141c));
+            if(on)frame(bx,rowY,66,0x2ef2ff,1,1);
+            text(std::to_string(w)+"PX",bx+14,rowY+25,18,on?0x2ef2ff:0x8aa4ae);
+        }
+        for(size_t i=0;i<=palette.size();++i){
+            const float sx0=left+172+float(i)*42;const bool on=int(i)==colorIndex;
+            const uint32_t c=cssteroids::css_color(i<palette.size()?palette[i]:customColor);
+            if(on)scene.rounded_rect({sx0-4,rowY-4,38,38},5,Color::rgb(0x2ef2ff));
+            scene.rounded_rect({sx0,rowY,30,30},3,Color::rgb(c));
+        }
+
+        // Live ship, fitted to its box; D-pad up/down magnifies around the region being filled
+        const double zoom=pattern::view_zooms[std::min(shipZoomIndex,pattern::view_zooms.size()-1)];
+        const auto view=pattern::fit_view(ed.ship.lines,viewSize,zoom,pattern::centre_of(fillRegion.points));
+        char zoomLabel[24];if(zoom>1)std::snprintf(zoomLabel,sizeof zoomLabel,"%.0f%%",zoom*100);else std::snprintf(zoomLabel,sizeof zoomLabel,"FIT");
+        text("LIVE SHIP FILL",viewLeft,top-22,20,0x8aa4ae);text(zoomLabel,viewLeft+viewSize-60,top-22,20,0x6d8893);
+        scene.rounded_rect({viewLeft,top,viewSize,viewSize},0,Color::rgb(0x03060a));frame(viewLeft,top,viewSize,0x16303b,2,1);
+        auto sx=[&](double u){return viewLeft+viewSize/2+float((u-view.centre.x)*view.scale);};
+        auto sy=[&](double u){return top+viewSize/2+float((u-view.centre.y)*view.scale);};
+        auto shipLine=[&](Pt a,Pt b,float width,uint32_t color,float alpha){clippedIn(shipBox,{sx(a.x),sy(a.y)},{sx(b.x),sy(b.y)},width,color,alpha);};
+        const float lineScale=float(std::clamp(view.scale*.6,.6,2.));
+        for(const auto &l:ed.ship.lines)if(l.meshGroup!=fillId || fillId.empty()){auto pts=pattern::flatten(l);for(size_t i=1;i<pts.size();++i)shipLine(pts[i-1],pts[i],float(l.width)*lineScale,cssteroids::css_color(l.color),l.mesh?.45f:1.f);}
+        for(const auto &l:patternPreview)shipLine(l.a,l.b,float(l.width)*lineScale,cssteroids::css_color(l.color),1);
+        for(size_t i=0;i<fillRegion.points.size();++i)shipLine(fillRegion.points[i],fillRegion.points[(i+1)%fillRegion.points.size()],2,0xff3bd4,.7f);
+        if(zoom>1){
+            const float mx=viewLeft+viewSize-160,my=top+10;
+            const auto mini=pattern::fit_view(ed.ship.lines,150);
+            scene.rounded_rect({mx,my,150,150},0,Color::rgb(0x0b1827,.92f));
+            auto mxp=[&](double u){return mx+75+float((u-mini.centre.x)*mini.scale);};auto myp=[&](double u){return my+75+float((u-mini.centre.y)*mini.scale);};
+            for(const auto &l:ed.ship.lines)if(!l.mesh)scene.line(mxp(l.a.x),myp(l.a.y),mxp(l.b.x),myp(l.b.y),1,Color::rgb(cssteroids::css_color(l.color)));
+            const double h=viewSize/2/view.scale;
+            frame(mxp(view.centre.x-h),myp(view.centre.y-h),float(2*h*mini.scale),0xf5e400,1,1);
+        }
+
+        char info[200];std::snprintf(info,sizeof info,"%s   %zu / 256 LINES   WIDTH %.0f   REPEAT %.2f   TILE ZOOM %.0fx",tool_names[patternTool],tileEditor.ship.lines.size(),patternWidth,patternScale,tileZoom);
+        text(info,80,985,23,0x9fb3c8);
+        text("L1 R1 Tool   L2 R2 Colour   CROSS Place   SQUARE Undo   TRIANGLE Redo   R3 Mirror   L3 Fine   D-PAD LEFT/RIGHT Nudge",80,1020,19,0x8293ab);
+        text(patternError.empty()?"OPTIONS Apply / Presets / Scale / Library / Test     RIGHT STICK Pan tile     D-PAD UP/DOWN Zoom ship     CIRCLE Cancel stroke / Menu":patternError,80,1052,19,patternError.empty()?0x8293ab:0xf0c07d);
         if(patternMenu){
             std::array<std::string,13> labels={"APPLY AND RETURN TO SHIP","CANCEL TILE CHANGES","PRESET: "+patternNames[patternPreset],"REPEAT SCALE (LEFT/RIGHT)","LINE WIDTH: "+std::to_string(int(patternWidth)),"ZOOM: "+std::to_string(int(tileZoom))+"x","RENAME PATTERN","SAVE TO LOCAL PATTERNS","LOAD NEXT LOCAL PATTERN","REMOVE THIS REGION'S FILL","APPLY AND TEST FLIGHT","IMPORT CSP1 FROM pattern-code.txt","EXPORT CSP1 TO pattern-code.txt"};
             scene.rounded_rect({480,110,960,840},12,Color::rgb(0x08111f,.98));

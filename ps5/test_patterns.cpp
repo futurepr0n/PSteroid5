@@ -84,5 +84,25 @@ int main(int argc,char **argv){
         }
     }
     if(argc>1)std::ofstream(argv[1])<<json::dump(fixtures);
-    std::cout<<"pattern regions, holes, fills, atomic limits, undo/refit, metadata and CSP1 tests passed\n";
+    {
+        // Ship preview framing: oversized ships fit, zoom centres on the fill but stays on the ship
+        std::vector<Line> big={{{-600,-900},{600,-900}},{{600,-900},{600,300}},{{600,300},{-600,300}},{{-600,300},{-600,-900}}};
+        auto fit=pat::fit_view(big,700);
+        assert(std::fabs(fit.centre.x)<1e-9 && std::fabs(fit.centre.y+300)<1e-9);
+        assert(std::fabs(fit.scale*1200-700*.88)<1e-6);
+        for(auto p:{Pt{-600,-900},Pt{600,300}}){double sx=(p.x-fit.centre.x)*fit.scale,sy=(p.y-fit.centre.y)*fit.scale;assert(std::fabs(sx)<=350 && std::fabs(sy)<=350);}
+        auto z=pat::fit_view(big,700,2,{-500,250});
+        assert(std::fabs(z.scale-fit.scale*2)<1e-9);
+        const double half=350/z.scale;
+        assert(z.centre.x-half>=-600-1e-9 && z.centre.y+half<=300+1e-9);
+        auto inside=pat::fit_view(big,700,2,{0,-300});
+        assert(std::fabs(inside.centre.x)<1e-9 && std::fabs(inside.centre.y+300)<1e-9);
+        auto empty=pat::fit_view({},700);assert(empty.scale==700./400 && empty.centre.x==0);
+        Line curve{{-10,0},{10,0}};curve.curved=true;curve.control={0,-400};Pt lo,hi;
+        assert(pat::bounds({curve},lo,hi) && lo.y<-190 && hi.y==0);
+        Line bad{{NAN,0},{5,5}};assert(!pat::bounds({bad},lo,hi));
+        auto c=pat::centre_of({{0,0},{10,4},{2,-6}});assert(c.x==5 && c.y==-1);
+        assert(pat::centre_of({}).x==0);
+    }
+    std::cout<<"pattern regions, holes, fills, atomic limits, undo/refit, metadata, CSP1 and preview framing tests passed\n";
 }

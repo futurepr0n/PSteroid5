@@ -190,4 +190,33 @@ inline bool decode(const std::string &code,Tile &out,std::string &error){
     for(auto key:{"version","name","width","height","cells","edges","color","strokeWidth"})if(!v.get(key)){error="Incomplete pattern code schema";return false;}
     auto t=read_tile(v);if(!valid(t)){error="Invalid pattern artwork";return false;}out=std::move(t);return true;
 }
+
+// Live ship preview framing: zoom 1 fits the whole ship; larger zooms magnify around a focus without leaving the ship
+constexpr std::array<double,5> view_zooms={1,1.5,2,3,4};
+struct View {Pt centre;double scale=1;};  // screen = view origin + (design point - centre) * scale
+inline bool bounds(const std::vector<Line> &lines,Pt &lo,Pt &hi){
+    bool any=false;
+    for(const auto &l:lines)for(auto p:flatten(l)){
+        if(!std::isfinite(p.x) || !std::isfinite(p.y))continue;
+        if(!any){lo=hi=p;any=true;continue;}
+        lo={std::min(lo.x,p.x),std::min(lo.y,p.y)};hi={std::max(hi.x,p.x),std::max(hi.y,p.y)};
+    }
+    return any;
+}
+inline View fit_view(const std::vector<Line> &lines,double px,double zoom=1,Pt focus={},double margin=.06){
+    Pt lo,hi;if(px<=0 || !bounds(lines,lo,hi))return {{0,0},px>0?px/400:1};
+    const double span=std::max({hi.x-lo.x,hi.y-lo.y,1.});
+    View v{{(lo.x+hi.x)/2,(lo.y+hi.y)/2},px*(1-2*margin)/span};
+    if(!(zoom>1))return v;
+    v.scale*=zoom;const double half=px/2/v.scale;
+    auto keep=[&](double f,double a,double b){return b-a<=2*half?(a+b)/2:std::clamp(f,a+half,b-half);};
+    v.centre={keep(focus.x,lo.x,hi.x),keep(focus.y,lo.y,hi.y)};
+    return v;
+}
+inline Pt centre_of(const std::vector<Pt> &points){
+    if(points.empty())return {};
+    Pt lo=points[0],hi=points[0];
+    for(auto p:points){lo={std::min(lo.x,p.x),std::min(lo.y,p.y)};hi={std::max(hi.x,p.x),std::max(hi.y,p.y)};}
+    return {(lo.x+hi.x)/2,(lo.y+hi.y)/2};
+}
 }
