@@ -27,6 +27,13 @@ function recorder() {
     beginPath() { path = []; start = cur = null; },
     moveTo(x, y) { start = cur = tx(x, y); path.push({ move: cur }); },
     lineTo(x, y) { const p = tx(x, y); if (cur) path.push({ seg: [cur, p] }); cur = p; },
+    quadraticCurveTo(cx, cy, x, y) {
+      const from=cur, control=tx(cx,cy), end=tx(x,y);
+      for(let i=1;i<=16;i++) {
+        const t=i/16,u=1-t,p=[u*u*from[0]+2*u*t*control[0]+t*t*end[0],u*u*from[1]+2*u*t*control[1]+t*t*end[1]];
+        path.push({seg:[cur,p]});cur=p;
+      }
+    },
     closePath() { if (cur && start && (cur[0] !== start[0] || cur[1] !== start[1])) path.push({ seg: [cur, start] }); cur = start; },
     arc(x, y, r) { const c = tx(x, y); path.push({ arc: [c[0], c[1], r * Math.hypot(m[0], m[1])] }); }, fillText() {}, fillRect() {}, strokeRect() {},
     createLinearGradient() { return { addColorStop() {} }; }, createRadialGradient() { return { addColorStop() {} }; },
@@ -135,6 +142,6 @@ quiet(JSON.stringify(summary, null, 1));
 if (failures.length) quiet('first problems:\n  ' + failures.join('\n  '));
 // Property and rebuild ships are produced by the editor and must all pass; corpus ships are
 // other people's drawings and may legitimately exceed the editor's canvas (reported, not failed).
-const mustPass = ['property', 'rebuild'];
+const mustPass = ['property', 'rebuild', 'designer'];
 const bad = Object.entries(byKind).filter(([k, v]) => mustPass.includes(k) && v.identical !== v.ships);
 process.exit(bad.length ? 1 : 0);

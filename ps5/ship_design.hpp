@@ -61,7 +61,7 @@ inline bool finite_num(const json::Value &v, const char *key, float &out) {
 }
 }
 
-constexpr size_t max_ship_lines = 400, max_ship_points = 16;
+constexpr size_t max_ship_lines = 5000, max_ship_points = 16;
 
 inline bool parse_ship(const json::Value &v, ShipDesign &out) {
     if (!v.is_object()) return false;
@@ -72,6 +72,7 @@ inline bool parse_ship(const json::Value &v, ShipDesign &out) {
     d.colorName = v.str("color", "white");
     d.shotSound = sound::valid_shot(v.str("shotSound"));
     auto &g = d.geometry;
+    static uint64_t nextRevision = 0; g.revision = ++nextRevision;
     g.color = css_color(d.colorName);
     g.shape = d.typeName == "triangle" ? ShipShape::triangle : d.typeName == "diamond" ? ShipShape::diamond
             : d.typeName == "custom" ? ShipShape::custom : ShipShape::standard;
@@ -81,7 +82,14 @@ inline bool parse_ship(const json::Value &v, ShipDesign &out) {
             float x1, y1, x2, y2;
             if (!l.is_object() || !detail::finite_num(l, "startX", x1) || !detail::finite_num(l, "startY", y1) ||
                 !detail::finite_num(l, "endX", x2) || !detail::finite_num(l, "endY", y2)) continue;
-            g.lines.push_back({x1 * .25f, y1 * .25f, x2 * .25f, y2 * .25f, css_color(l.str("color"), g.color)});
+            Segment seg{x1*.25f,y1*.25f,x2*.25f,y2*.25f,css_color(l.str("color"),g.color)};
+            seg.width = l.num("width") == 1 ? 1 : 2;
+            seg.mesh = l.get("mesh") && l.get("mesh")->b;
+            float cx,cy;
+            if(detail::finite_num(l,"controlX",cx) && detail::finite_num(l,"controlY",cy)) {
+                seg.curved=true;seg.cx=cx*.25f;seg.cy=cy*.25f;
+            }
+            g.lines.push_back(seg);
             if (g.lines.size() == max_ship_lines) break;
         }
     }
@@ -125,7 +133,7 @@ struct ShipStore {
         std::stringstream text;
         text << file.rdbuf();
         json::Value v;
-        return text.str().size() < (1u << 20) && json::parse(text.str(), v) && parse_ship(v, out);
+        return text.str().size() < (1u << 22) && json::parse(text.str(), v) && parse_ship(v, out);
     }
     bool save(const std::string &shipJson) const {
         if (const auto split = path.find_last_of('/'); split != std::string::npos) mkdir(path.substr(0, split).c_str(), 0777);

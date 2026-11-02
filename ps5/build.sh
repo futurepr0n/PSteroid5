@@ -22,7 +22,19 @@ if [[ ! -f $host/$stamp ]]; then
     touch "$host/$stamp"
 fi
 
-# Portable tests: simulation and power-ups, then JSON/HTTP/TLS against loopback fixtures.
+# Pattern authoring and independent browser/server-document parity.
+g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/test_patterns.cpp" -o "$app/test-patterns"
+"$app/test-patterns" "$app/pattern-evidence.json"
+if [[ -x "/mnt/c/Program Files/nodejs/node.exe" && -d $repo/../CSSTeroids-2 ]]; then
+    "/mnt/c/Program Files/nodejs/node.exe" "$(wslpath -w "$repo/tools/pattern-evidence.mjs")" "$(wslpath -w "$app/pattern-evidence.json")"
+    "$app/test-patterns" decode "$app/pattern-evidence.json.browser-codes.json"
+else
+    echo "Browser reference / Windows Node required for pattern parity" >&2; exit 1
+fi
+
+# Portable visual geometry/effects and existing simulation/network tests.
+g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/test_space.cpp" -o "$app/test-space"
+"$app/test-space"
 g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/test_core.cpp" -o "$app/test-core"
 "$app/test-core"
 g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/test_powerups.cpp" -o "$app/test-powerups"
@@ -41,7 +53,8 @@ PSTEROIDS_LIVE=${PSTEROIDS_LIVE:-} "$app/test-net" "$(cat "$app/fixture.port")" 
 # Ship editor: model tests, then evidence judged by CSSteroids-2's own server validators and
 # browser ship.js (tools/ship-evidence.js; property sessions, gallery round trips, rebuilds).
 g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/test_editor.cpp" -o "$app/test-editor"
-"$app/test-editor"
+"$app/test-editor" "$app/hull-evidence.json"
+"/mnt/c/Program Files/nodejs/node.exe" "$(wslpath -w "$repo/tools/hull-evidence.mjs")" "$(wslpath -w "$app/hull-evidence.json")"
 g++ -std=c++20 -O2 -Wall -Wextra -pedantic "$repo/ps5/ship_evidence.cpp" -o "$app/ship-evidence"
 "$app/ship-evidence" "$repo/ps5/testdata/ship_corpus.json" "$app/ship_evidence.json" 400
 if [[ -x "/mnt/c/Program Files/nodejs/node.exe" && -d $repo/../CSSTeroids-2 ]]; then
@@ -58,7 +71,8 @@ g++ -std=c++20 -O2 -Wall -Wextra -pedantic -pthread "$repo/ps5/test_sound.cpp" -
 "$app/test-sound" "$app/sound_samples.json"
 if [[ -x "/mnt/c/Program Files/nodejs/node.exe" && -d $repo/../CSSTeroids-2 ]]; then
     "/mnt/c/Program Files/nodejs/node.exe" "$(wslpath -w "$repo/tools/sound-evidence.js")" "$(wslpath -w "$app/sound_samples.json")" > "$app/sound-evidence.json"
-    tr -d '' < "$app/sound-evidence.json" | grep -m1 worstDifference
+    tr -d '
+' < "$app/sound-evidence.json" | grep -m1 worstDifference
 else
     echo "Windows Node or ../CSSTeroids-2 missing: sound evidence not judged"
 fi

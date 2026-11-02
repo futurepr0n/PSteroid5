@@ -29,13 +29,22 @@ struct Rng {
 enum class ShipShape { standard, triangle, diamond, custom };
 
 struct Point { float x = 0, y = 0; };
-struct Segment { float x1, y1, x2, y2; uint32_t color; };
+struct Segment {
+    float x1, y1, x2, y2; uint32_t color;
+    float width = 2; bool mesh = false, curved = false; float cx = 0, cy = 0;
+};
+inline Point segment_at(const Segment &l, double t) {
+    const double u = 1-t;
+    return l.curved ? Point{float(u*u*l.x1+2*u*t*l.cx+t*t*l.x2), float(u*u*l.y1+2*u*t*l.cy+t*t*l.y2)}
+                    : Point{float(l.x1+(l.x2-l.x1)*t),float(l.y1+(l.y2-l.y1)*t)};
+}
 
 // A ship's look and gameplay geometry, in ship space (angle 0 = up, already at
 // the browser's 0.25 design scale). Built from server/customizer JSON elsewhere.
 struct ShipGeometry {
     ShipShape shape = ShipShape::standard;
     uint32_t color = 0xffffff;
+    uint64_t revision = 0;
     std::vector<Segment> lines;    // custom ships only
     std::vector<Point> weapons;    // empty: one round from the nose
     std::vector<Point> thrusters;  // empty: default flame position(s)
@@ -54,9 +63,18 @@ inline bool segment_hits_circle(double x1, double y1, double x2, double y2, doub
 inline bool ship_hits_circle(const ShipGeometry &g, double sx, double sy, double angle, double cx, double cy, double r, double radius = 15) {
     if (!g.custom()) return std::hypot(sx - cx, sy - cy) < radius + r;
     const double c = std::cos(angle), s = std::sin(angle);
-    for (const auto &l : g.lines)
-        if (segment_hits_circle(sx + l.x1 * c - l.y1 * s, sy + l.x1 * s + l.y1 * c,
-                                sx + l.x2 * c - l.y2 * s, sy + l.x2 * s + l.y2 * c, cx, cy, r)) return true;
+    const bool hasHull = std::any_of(g.lines.begin(),g.lines.end(),[](const auto &l){return !l.mesh;});
+    for (const auto &l : g.lines) {
+        if (hasHull && l.mesh) continue;
+        const int steps = l.curved ? 16 : 1;
+        Point a{l.x1,l.y1};
+        for (int i=1;i<=steps;++i) {
+            const Point b=segment_at(l,double(i)/steps);
+            if (segment_hits_circle(sx+a.x*c-a.y*s,sy+a.x*s+a.y*c,
+                                    sx+b.x*c-b.y*s,sy+b.x*s+b.y*c,cx,cy,r)) return true;
+            a=b;
+        }
+    }
     return std::hypot(sx - cx, sy - cy) < radius;
 }
 

@@ -390,7 +390,7 @@ inline Response request(const Endpoint &to, const char *method, const std::strin
         if (n == -2) { out.error = "response timed out"; return out; }
         if (n < 0) { out.error = conn.error; return out; }
         if (n == 0 || response_complete(raw)) break;
-        if (raw.size() > (1u << 21)) { out.error = "response too large"; return out; }
+        if (raw.size() > (1u << 23)) { out.error = "response too large"; return out; }
     }
     if (!parse_response(raw, out)) out.status = 0;
     return out;

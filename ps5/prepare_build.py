@@ -6,8 +6,8 @@ Adapted from PSPGameCPP/ps5/prepare_build.py. Uses its own staging tree
 from pathlib import Path
 import json, shutil, subprocess, sys, hashlib
 
-PORT_REVISION = 'm3-https-server-api-2026-10-23'
-HEADERS = ['powerups.hpp', 'asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp', 'socketio.hpp', 'mmo_world.hpp', 'coop_lobby.hpp', 'ship_render.hpp', 'sound.hpp', 'ship_editor.hpp']
+PORT_REVISION = 'launcher-art-01.004.002'
+HEADERS = ['powerups.hpp', 'asteroids_core.hpp', 'json_lite.hpp', 'ca_bundle.hpp', 'net_http.hpp', 'server_api.hpp', 'ship_design.hpp', 'score_store.hpp', 'socketio.hpp', 'mmo_world.hpp', 'coop_lobby.hpp', 'ship_render.hpp', 'space_effects.hpp', 'sound.hpp', 'editor_geometry.hpp', 'pattern_design.hpp', 'ship_editor.hpp']
 
 repo = Path(sys.argv[1]).resolve()
 # ps5/sce_sys/param.json is the title's identity (the catalog reads it from the repository).
@@ -124,7 +124,7 @@ def git(path, *args):
 reference = repo.parent / 'CSSTeroids-2'
 has_head = subprocess.run(['git', '-C', str(repo), 'rev-parse', '--verify', '-q', 'HEAD'], capture_output=True).returncode == 0
 sources = sorted(p for p in (repo / 'ps5').rglob('*') if p.is_file() and '__pycache__' not in p.parts
-                 and p.name != 'validation.json')
+                 and p.name not in {'validation.json', 'ship_evidence_report.json'})
 provenance = {
     'reference_project': {'path': 'CSSTeroids-2 (read-only reference)', 'url': 'https://github.com/futurepr0n/CSSteroids-2',
                           'commit': git(reference, 'rev-parse', 'HEAD')} if (reference / '.git').exists() else None,

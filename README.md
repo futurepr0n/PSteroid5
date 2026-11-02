@@ -9,7 +9,8 @@ pilots share high scores, ships and the online world.
 - MMO: drop into the shared online world with browser players at any time
 - Power-ups in every mode: extra life, rapid fire, spray and shield
 - Hangar: fly any ship from the public gallery, or load your own by passphrase
-- Ship editor: build and save custom ships with the controller (touchpad drag supported)
+- Ship editor: hulls and repeating pattern artwork, presets, local pattern library and browser-compatible saves (controller/touchpad)
+- Parallax space, arcing shooting stars and ship-coloured power-up trails
 - Online high scores
 
 Tested on PS5 Phat/BD, firmware 4.03.
@@ -34,3 +35,6 @@ Build (Windows PowerShell with the PS5 PayloadSDK/Vulkan toolchain in WSL):
 GPL-3.0-or-later (see [LICENSE](LICENSE)). Bundled components keep their own licences:
 mbedTLS (Apache-2.0, `third_party/mbedtls`), and the PS5 platform, renderer and toolchain
 libraries listed in the package's `THIRD_PARTY_NOTICES.txt` and `licenses/`.
+
+Update work and console acceptance plan:
+[01.004.000 pattern authoring](docs/plans/2026-10-31-pattern-authoring.md).

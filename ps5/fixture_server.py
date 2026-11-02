@@ -10,6 +10,8 @@ ROWS = [{"id": 1, "name": "Fixture Ace", "score": 9000, "shipType": "custom", "s
         {"id": 2, "name": "Second", "score": 4500, "shipType": "default", "shipColor": "white"},
         {"id": 3, "name": "Third", "score": 100, "shipType": "diamond", "shipColor": "red"}]
 
+SHIPS = {}
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     def log_message(self, *args): pass
@@ -29,10 +31,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/api/high-scores': self.reply(200, json.dumps(ROWS))
         elif self.path == '/chunked': self.reply(200, json.dumps(ROWS), chunked=True)
+        elif self.path.startswith('/api/ships/passphrase/') and self.path.rsplit('/', 1)[1] in SHIPS:
+            phrase = self.path.rsplit('/', 1)[1]
+            self.reply(200, json.dumps(SHIPS[phrase]))
         else: self.reply(404, '{"message":"not found"}')
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
-        self.reply(201 if self.path == '/api/high-scores' else 404, body)
+        if self.path == '/api/ships/editor':
+            payload = json.loads(body)
+            ship = payload['document']['ship']
+            phrase = 'swift-hawk-diving'
+            SHIPS[phrase] = dict(ship, editorDocument=payload['document'], passphrase=phrase, isPublic=payload.get('isPublic') is True)
+            self.reply(201, json.dumps(dict(id=1, name=ship['name'], passphrase=phrase, isPublic=SHIPS[phrase]['isPublic'])))
+        else:
+            self.reply(201 if self.path == '/api/high-scores' else 404, body)
+    def do_PUT(self):
+        body = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
+        phrase = self.path.rsplit('/', 1)[-1]
+        if not self.path.startswith('/api/ships/passphrase/') or phrase not in SHIPS:
+            self.reply(404, '{}'); return
+        payload = json.loads(body)
+        public = SHIPS[phrase]['isPublic']
+        ship = payload['document']['ship']
+        SHIPS[phrase] = dict(ship, editorDocument=payload['document'], passphrase=phrase, isPublic=public)
+        self.reply(200, json.dumps(dict(id=1, name=ship['name'], passphrase=phrase, isPublic=public)))
 
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 if len(sys.argv) == 3:  # fixture_server.py CERT KEY: HTTPS with an untrusted certificate
